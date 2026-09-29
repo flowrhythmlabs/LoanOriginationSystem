@@ -18,7 +18,7 @@ The frontend is a single-page application. Its progress indicator labels five st
 - Draft creation and updates persisted by the backend.
 - Backend submission logic that requires all four document types and a persisted credit-check record, then assigns an LOS number.
 - An Admin-only Recent Applications table with applicant-name/LOS-number/mobile text filtering, status filtering, and an Open action.
-- Local file-backed H2 persistence and filesystem document storage by default.
+- PostgreSQL persistence and filesystem document storage by default; H2 is used for backend tests.
 
 ### Current integration gaps
 
@@ -33,7 +33,7 @@ The frontend is a single-page application. Its progress indicator labels five st
 | --- | --- |
 | Backend | Java 17, Spring Boot 3.3.3, Spring Web, Spring Security, Spring Data JPA, Bean Validation |
 | Backend build | Maven; no Maven Wrapper is included |
-| Database | H2 2.x dependency, file-backed by default for local runs |
+| Database | PostgreSQL for runtime; H2 in-memory database for tests |
 | Frontend | React 18, TypeScript 5, Vite 5 |
 | Document bytes | Local filesystem |
 | Automated tests | Spring Boot Test / JUnit via Maven; TypeScript build via npm |
@@ -54,7 +54,7 @@ backend/
     security/     Demo identity-header filter
     service/      Application, document, mock credit, PAN, and KYC logic
   src/main/resources/  Runtime and test configuration
-  data/                Local H2 database and uploaded documents at runtime
+  data/documents/      Uploaded document files at runtime
 frontend/
   src/App.tsx           LOS form, Admin table, and page-level login gate
   src/LoginPage.tsx     Demo login screen
@@ -92,7 +92,7 @@ mvn package
 
 ## 7. Run the Application
 
-Run each process in a separate terminal. Start Maven from `backend` so the default relative H2 and document paths resolve beneath `backend/data/`.
+Run each process in a separate terminal. Start Maven from `backend` so the relative document path resolves beneath `backend/data/`. Configure the PostgreSQL environment variables before starting the backend; the default database is `loan_origination` on `localhost:5432`.
 
 Backend:
 
@@ -154,7 +154,7 @@ The create/update request cascades Bean Validation into its nested applicant, em
 
 ### Save and reopen behavior
 
-Save Draft creates an application if needed, then sends the current applicant, employment, and loan data to the backend. Uploaded document metadata is stored in H2 and document bytes are stored separately in the configured filesystem directory. Data remains after a browser refresh and backend restart with the default file-backed database.
+Save Draft creates an application if needed, then sends the current applicant, employment, and loan data to the backend. Application and document metadata are stored in PostgreSQL; document bytes are stored separately in the configured filesystem directory. Data remains after a browser refresh and backend restart when PostgreSQL and the document directory are retained.
 
 There is no User-facing list or resume control. The Admin Recent Applications table can open an application and reload its details and uploaded document list. The table's **Open** action is not a separate review/approval workflow.
 
@@ -168,12 +168,12 @@ The success panel displays the returned LOS number and status. The Admin table a
 
 The Admin role displays summary counts and a **Recent Applications** table. The table can:
 
-- Search case-insensitive substrings in applicant name, LOS number, or mobile number.
+- Search case-insensitive substrings in applicant name, LOS number, or mobile number. Search and status filtering run in PostgreSQL through Spring Data JPA queries.
 - Filter by All, Draft, or Submitted status.
 - Open an application to restore its fields and document list.
 - Edit fields and use the existing Save Draft control.
 
-Mobile-number search is supported by the current table using the mobile number included in each application summary. There are no implemented approval/rejection actions or separate Admin pages; the navigation links are placeholders on the single page.
+The dashboard totals are loaded separately from the filtered table results. There are no implemented approval/rejection actions or separate Admin pages; the navigation links are placeholders on the single page.
 
 ## 11. Application Statuses
 
@@ -189,21 +189,38 @@ The entity defines these values:
 | `APPROVED` | Defined in the enum; no current approval action assigns it. |
 | `REJECTED` | Defined in the enum; no current rejection action assigns it. |
 
-## 12. Database and File Storage
+## 12. PostgreSQL Setup and File Storage
 
-The default runtime database is file-backed H2:
+PostgreSQL is the runtime database. The default JDBC URL is `jdbc:postgresql://localhost:5432/loan_origination`; the username defaults to `postgres`, and the password must be configured locally. Hibernate uses `ddl-auto: update`, which creates or updates the schema without dropping existing data. The database must exist before backend startup.
 
-- JDBC URL: `jdbc:h2:file:./data/losdb`
-- Database file: `backend/data/losdb.mv.db` when the backend is started from `backend/`
-- Schema setting: Hibernate `ddl-auto: update`
-- H2 console: `http://localhost:8080/h2-console` (local development only)
-- Default H2 console connection: JDBC URL above, username `sa`, blank password
+1. Install PostgreSQL and start its service.
+2. Create the application database as a PostgreSQL administrator:
 
-The default database and uploaded document files survive backend restarts. The test profile uses an in-memory H2 database with `create-drop` and a test upload directory. H2 console and the default blank local database password are development settings, not production settings.
+```sql
+CREATE DATABASE loan_origination;
+```
 
-Persisted JPA data includes applicants, loan applications, employment details, loan details, credit checks, documents' metadata, and KYC verifications. Application rows reference their applicant, employment, loan, credit-check, and document records. The LOS number is stored on the application. Uploaded bytes are written to `backend/data/documents/` by default; only their metadata/path is in the database.
+3. Set connection variables in the backend process environment. In PowerShell:
 
-To preserve local records, back up `backend/data/` while the backend is stopped. Deleting that directory resets the default local database and document store. If `DB_URL` or `DOCUMENT_STORAGE_PATH` is overridden, data is stored at the overridden locations instead.
+```powershell
+$env:DB_HOST = "localhost"
+$env:DB_PORT = "5432"
+$env:DB_NAME = "loan_origination"
+$env:DB_USERNAME = "postgres"
+$env:DB_PASSWORD = "your-local-password"
+```
+
+`.env.example` lists the variable names and safe defaults. Spring Boot does not load `.env` files automatically; export variables in the process environment or use a local tool that does so. Do not commit `.env` files or real passwords.
+
+4. From `backend/`, start the service:
+
+```powershell
+mvn spring-boot:run
+```
+
+Application data stored in PostgreSQL includes applicants, loan applications, employment and loan details, credit checks, document metadata, and KYC verifications. Drafts remain available after browser refresh, logout, and backend restart as long as the same PostgreSQL database is retained. There is no User-facing draft picker; Admin can open saved applications from Recent Applications.
+
+Document bytes are stored on the filesystem under `backend/data/documents/` by default; PostgreSQL stores their metadata and paths. Keep this directory along with the database to preserve uploaded files. `DOCUMENT_STORAGE_PATH` can override the file location. Existing H2 records are not imported automatically. H2 is retained only for the in-memory test profile, which uses `create-drop` and a test upload directory.
 
 ## 13. Backend API Overview
 
@@ -213,7 +230,8 @@ The frontend reaches the API through Vite's `/api` proxy. Application endpoints 
 | --- | --- |
 | `POST /api/auth/login/user` | Public demo login. JSON body: `mobileNumber`, `otp`. Returns role, normalized mobile number, and message; invalid credentials return 401. No token is issued. |
 | `POST /api/auth/login/admin` | Public demo login. JSON body: `username`, `password`. Returns role, username, and message; invalid credentials return 401. No token is issued. |
-| `GET /api/applications` | Lists application summaries; intended for Admin. Returns an array with ID, LOS number, applicant name and mobile, loan type, status, creation time, score, and amount. |
+| `GET /api/applications?search={term}&status={status}` | Lists matching application summaries; intended for Admin. Search is optional and matches LOS number, applicant name, or mobile. Status is optional (`ALL`, `DRAFT`, or `SUBMITTED`). Returns an array with ID, LOS number, applicant name and mobile, loan type, status, creation time, score, and amount. |
+| `GET /api/applications/counts` | Returns total, draft, under-review, and submitted application counts for the dashboard. |
 | `POST /api/applications` | Creates a draft. JSON body has `applicant`, `employment`, and `loanDetails`; returns application details including ID, status, and any LOS number. |
 | `GET /api/applications/{id}` | Returns application fields, status, credit score if persisted, and LOS number; access is checked against the demo principal. |
 | `PUT /api/applications/{id}` | Updates applicant, employment, and loan details. Uses the same JSON body shape as create. |
@@ -229,7 +247,6 @@ The frontend reaches the API through Vite's `/api` proxy. Application endpoints 
 | `GET /api/applications/{id}/kyc` | Returns the application's KYC verification. |
 | `POST /api/applications/{id}/kyc/retry` | Retries an existing non-verified mock verification and returns its updated record. |
 
-There is no `/api/admin` controller or search API in the current source. Admin table filtering is performed in the browser after loading the application list.
 
 ## 14. KYC and Mock Services
 
@@ -243,10 +260,11 @@ Runtime settings are in [backend/src/main/resources/application.yml](backend/src
 
 | Environment variable | Default/use |
 | --- | --- |
-| `DB_URL` | `jdbc:h2:file:./data/losdb` |
-| `DB_DRIVER_CLASS_NAME` | `org.h2.Driver` |
-| `DB_USERNAME` | `sa` |
-| `DB_PASSWORD` | Blank |
+| `DB_HOST` | `localhost` |
+| `DB_PORT` | `5432` |
+| `DB_NAME` | `loan_origination` |
+| `DB_USERNAME` | `postgres` |
+| `DB_PASSWORD` | PostgreSQL user password; configure locally |
 | `DOCUMENT_STORAGE_PATH` | `./data/documents` |
 | `LOAN_MAX_INTEREST_RATE` | `30` percent |
 | `MOCK_KYC_MODE` | `SUCCESS` |
@@ -270,7 +288,7 @@ cd frontend
 npm run build
 ```
 
-Maven tests activate the `test` profile, which uses in-memory H2 and `backend/target/test-uploads`. The frontend package does not define a separate automated test script.
+Maven tests activate the `test` profile, which uses test-scoped in-memory H2 and `backend/target/test-uploads`. The frontend package does not define a separate automated test script.
 
 ## 17. Troubleshooting
 
@@ -278,9 +296,9 @@ Maven tests activate the `test` profile, which uses in-memory H2 and `backend/ta
 
 Run `mvn -version`. Install Maven and add its `bin` directory to `PATH`, or use a terminal where Maven is already configured. The repository does not include Maven Wrapper scripts.
 
-### Backend does not start or reports the database is in use
+### Backend cannot connect to PostgreSQL
 
-Check the Maven/Spring logs and confirm no other backend process is using port 8080 or `backend/data/losdb.mv.db`. Run the backend from `backend/` so its relative data path is consistent. Stop the existing backend cleanly before starting another one; do not delete database files while it is running.
+Confirm PostgreSQL is running, the configured database exists, and `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USERNAME`, and `DB_PASSWORD` match a user allowed to connect to it. Hibernate creates or updates the application schema after connecting. The old H2 file is not used by the runtime configuration.
 
 ### Frontend does not start
 

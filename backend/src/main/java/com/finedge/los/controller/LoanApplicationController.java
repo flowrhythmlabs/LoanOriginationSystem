@@ -24,6 +24,7 @@ import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
@@ -45,8 +46,15 @@ public class LoanApplicationController {
     }
 
     @GetMapping("/applications")
-    public ResponseEntity<List<ApplicationResponse>> getAllApplications() {
-        return ResponseEntity.ok(service.getAllApplications());
+    public ResponseEntity<List<ApplicationResponse>> getAllApplications(
+            @RequestParam(required = false) String search,
+            @RequestParam(required = false) String status) {
+        return ResponseEntity.ok(service.getAdminApplications(search, status));
+    }
+
+    @GetMapping("/applications/counts")
+    public ResponseEntity<Map<String, Long>> getApplicationCounts() {
+        return ResponseEntity.ok(service.getApplicationCounts());
     }
 
     @PostMapping("/applications")

@@ -5,6 +5,7 @@ import com.finedge.los.dto.ApplicationDetailResponse;
 import com.finedge.los.dto.CreateApplicationRequest;
 import com.finedge.los.dto.LoanDetailsRequest;
 import com.finedge.los.entity.*;
+import com.finedge.los.entity.LoanApplication.ApplicationStatus;
 import com.finedge.los.exception.ResourceNotFoundException;
 import com.finedge.los.repository.ApplicantRepository;
 import com.finedge.los.repository.LoanApplicationRepository;
@@ -21,6 +22,7 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -70,32 +72,27 @@ public class LoanApplicationService {
             throw new AccessDeniedException("Only admins can access the admin dashboard");
         }
 
-        String normalizedSearch = search == null ? "" : search.trim().toLowerCase();
-        String normalizedStatus = status == null || "ALL".equalsIgnoreCase(status) ? "" : status.toUpperCase();
+            String normalizedSearch = search == null ? "" : search.trim().toLowerCase();
+            ApplicationStatus normalizedStatus = status == null || status.isBlank() || "ALL".equalsIgnoreCase(status)
+                ? null
+                : ApplicationStatus.valueOf(status.trim().toUpperCase());
 
-        return repository.findAll().stream()
-                .filter(application -> application.getApplicant() != null)
-                .filter(application -> {
-                    if (!normalizedSearch.isEmpty()) {
-                        String losNumber = application.getLosNumber() == null ? "" : application.getLosNumber().toLowerCase();
-                        String applicantName = application.getApplicant().getFullName() == null ? "" : application.getApplicant().getFullName().toLowerCase();
-                        String mobile = application.getApplicant().getMobileNumber() == null ? "" : application.getApplicant().getMobileNumber();
-                        boolean matchesSearch = losNumber.contains(normalizedSearch)
-                                || applicantName.contains(normalizedSearch)
-                                || mobile.contains(normalizedSearch);
-                        if (!matchesSearch) {
-                            return false;
-                        }
-                    }
-                    if (!normalizedStatus.isEmpty() && application.getStatus() != null
-                            && !application.getStatus().name().equals(normalizedStatus)) {
-                        return false;
-                    }
-                    return true;
-                })
+            return repository.searchApplications(normalizedSearch, normalizedStatus).stream()
                 .map(ApplicationResponse::fromEntity)
                 .collect(Collectors.toList());
     }
+
+            @Transactional(readOnly = true)
+            public Map<String, Long> getApplicationCounts() {
+            if (hasAuthenticationContext() && !isAdmin()) {
+                throw new AccessDeniedException("Only admins can access the admin dashboard");
+            }
+            return Map.of(
+                "total", repository.count(),
+                "draft", repository.countByStatus(ApplicationStatus.DRAFT),
+                "underReview", repository.countByStatus(ApplicationStatus.UNDER_REVIEW),
+                "submitted", repository.countByStatus(ApplicationStatus.SUBMITTED));
+            }
 
     @Transactional(readOnly = true)
     public LoanApplication getById(Long id) {

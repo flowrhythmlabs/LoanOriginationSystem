@@ -180,6 +180,7 @@ function App() {
   const [status, setStatus] = useState('DRAFT');
   const [submittedApplication, setSubmittedApplication] = useState<{ losNumber?: string; status?: string; createdAt?: string } | null>(null);
   const [applications, setApplications] = useState<ApplicationRow[]>([]);
+  const [applicationCounts, setApplicationCounts] = useState({ total: 0, draft: 0, underReview: 0, submitted: 0 });
   const [search, setSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState('ALL');
   const [documents, setDocuments] = useState<Record<DocumentType, DocumentEntry>>(createInitialDocuments());
@@ -218,15 +219,20 @@ function App() {
     if (!session) {
       return;
     }
-    fetchApplications();
-  }, [session]);
+    fetchApplications(search, filterStatus);
+  }, [session, search, filterStatus]);
 
-  const fetchApplications = async () => {
+  const fetchApplications = async (searchValue = search, statusValue = filterStatus) => {
     try {
-      const response = await apiFetch('/api/applications');
+      const query = new URLSearchParams({ search: searchValue, status: statusValue });
+      const response = await apiFetch(`/api/applications?${query.toString()}`);
       if (response.ok) {
         const data = await response.json();
         setApplications(data);
+        const countsResponse = await apiFetch('/api/applications/counts');
+        if (countsResponse.ok) {
+          setApplicationCounts(await countsResponse.json());
+        }
       } else {
         setApplications([]);
       }
@@ -376,16 +382,7 @@ function App() {
     setKycMessage('');
   };
 
-  const filteredRows = useMemo(() => {
-    return applications.filter((row) => {
-      const normalizedSearch = search.toLowerCase();
-      const matchesSearch = !search || row.applicantName.toLowerCase().includes(normalizedSearch)
-        || (row.losNumber ?? '').toLowerCase().includes(normalizedSearch)
-        || (row.applicantMobile ?? '').includes(normalizedSearch);
-      const matchesStatus = filterStatus === 'ALL' || row.status === filterStatus;
-      return matchesSearch && matchesStatus;
-    });
-  }, [applications, search, filterStatus]);
+  const filteredRows = applications;
 
   const loanValidationMessage = useMemo(() => {
     const principal = parseNumericValue(loanDetails.requestedLoanAmount);
@@ -676,10 +673,10 @@ function App() {
         </section>
 
         <section className="dashboard-grid">
-          <div className="card metric"><span>Total Applications</span><strong>{applications.length}</strong></div>
-          <div className="card metric"><span>Draft Applications</span><strong>{applications.filter((item) => item.status === 'DRAFT').length}</strong></div>
-          <div className="card metric"><span>Under Review</span><strong>{applications.filter((item) => item.status === 'UNDER_REVIEW').length}</strong></div>
-          <div className="card metric"><span>Submitted Applications</span><strong>{applications.filter((item) => item.status === 'SUBMITTED').length}</strong></div>
+          <div className="card metric"><span>Total Applications</span><strong>{applicationCounts.total}</strong></div>
+          <div className="card metric"><span>Draft Applications</span><strong>{applicationCounts.draft}</strong></div>
+          <div className="card metric"><span>Under Review</span><strong>{applicationCounts.underReview}</strong></div>
+          <div className="card metric"><span>Submitted Applications</span><strong>{applicationCounts.submitted}</strong></div>
         </section>
 
         <section className="card form-card">

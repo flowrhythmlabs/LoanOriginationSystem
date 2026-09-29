@@ -23,7 +23,7 @@ Choose **User** on the login screen.
 
 ### Step 3 - Enter a Mobile Number
 
-Enter a 10-digit mobile number using digits only. Do not include the country code `+91`. The application removes punctuation before checking the number, but entering digits only avoids confusion.
+Enter exactly 10 digits. Do not enter spaces, punctuation, letters, or the country code `+91`; the application rejects non-digit input.
 
 ### Step 4 - Send OTP
 
@@ -86,13 +86,17 @@ The application lists four required document types:
 
 For each item, select **Choose File**, choose a non-empty PDF, JPG/JPEG, or PNG file, and check that its status changes to **Uploaded**. Each file must be no larger than 10 MB. If a document is already uploaded, select **Replace** to upload a replacement. Use **View** to open a stored file.
 
-All four document types must be uploaded before the backend accepts a submission. Uploaded files and their records are stored on the local server.
+All four document types must be uploaded before the backend accepts a submission. Document bytes are stored on the backend server's filesystem; document metadata is stored in PostgreSQL.
 
 ### 7. Save a Draft
 
-Select **Save Draft** to store the current applicant, employment, and loan details. Uploaded documents are stored when each upload succeeds. The data remains in the local application database after a browser refresh or backend restart.
+Select **Save Draft** to store the current applicant, employment, and loan details in PostgreSQL. Uploaded documents are stored when each upload succeeds. Draft data remains available after browser refresh, logout, or backend restart as long as the backend reconnects to the same PostgreSQL database and the document-storage directory is retained.
 
 There is no User-facing saved-application list in the current application, so a User cannot select and reopen a draft from the screen. An Admin can use **Recent Applications** and **Open** to reload a saved application. The application form itself does not automatically restore the last draft after a refresh.
+
+### Where application data is stored
+
+The running application uses the PostgreSQL database `loan_origination` by default. PostgreSQL stores applicant, loan, application, credit-check, KYC, and document metadata. Uploaded document files are stored separately on the backend filesystem, in `backend/data/documents/` by default. Both the database and document directory must be retained to preserve applications and their uploaded files. Existing records from the former H2 database are not imported automatically.
 
 ### 8. Submit the Application
 
@@ -121,13 +125,13 @@ The login screen currently checks these credentials in the browser. This is not 
 
 ## Admin Dashboard and Recent Applications
 
-The Admin view is part of the same page as the application form. It shows counts for Total Applications, Draft Applications, Under Review, and Submitted Applications, followed by the **Recent Applications** table. These are counts and rows from the backend application list; statuses that are not assigned by the current workflow may remain at zero.
+The Admin view is part of the same page as the application form. It shows Total Applications, Draft Applications, Under Review, and Submitted Applications counts, followed by the **Recent Applications** table. The counts and table data come from the backend; statuses that are not assigned by the current workflow may remain at zero. Search results do not change the dashboard totals.
 
 ## Search and Filter
 
-Type part of an applicant name or LOS Number in the search field. Search ignores letter case and matches a substring. Mobile-number search is not available in the current screen. Use the status menu to show All Status, Draft, or Submitted applications.
+Type part of an applicant name, LOS Number, or mobile number in the search field. Search ignores letter case for names and LOS numbers and matches a substring. Search and status filtering are performed by the backend against persisted PostgreSQL data. Use the status menu to show All Status, Draft, or Submitted applications.
 
-Examples: searching `amit` can match an applicant named Amit Sharma; searching `LOS-2026` can match LOS numbers from that year.
+Examples: searching `amit` can match an applicant named Amit Sharma; searching `LOS-2026` can match LOS numbers from that year; searching `9876` can match a mobile number containing those digits.
 
 ## Open and Update an Application
 
@@ -154,6 +158,7 @@ Both User and Admin can select **Logout** in the top navigation. This clears the
 | Unable to open application | Confirm the application still appears in Recent Applications and try again. If it continues, contact the application maintainer. |
 | Session expired or returned to login | Log in again. The demo login is stored in the current browser session and the UI clears it after an API authorization error. |
 | Upload failed | Choose a non-empty PDF/JPG/JPEG/PNG file up to 10 MB and retry. |
+| Applications or documents are unavailable after a restart | Ask the application operator to confirm PostgreSQL is running and that the same database and document-storage directory are configured. |
 
 ## Important Notes
 
