@@ -11,6 +11,22 @@ FinEdge Bank's Loan Origination System (LOS) is a demonstration application for 
 
 This is a demo. It does not make real lending decisions or connect to a real credit bureau or KYC provider. The login choices are for demonstration and are not production security.
 
+## 1. Login
+
+Users enter exactly 10 digits, select **Send OTP**, and use the fixed demo OTP `123456`. No SMS is sent. Administrators select **Admin** and use the demo username `admin` and password `admin`.
+
+> **DEMO ONLY:** The OTP and admin credentials are public test values and must not be used for a production service.
+
+After successful login, the backend issues a temporary access token for the browser session. Do not share login details or tokens.
+
+## 2. User Security
+
+Users can access and modify only applications belonging to their logged-in mobile number. Users cannot open Admin Recent Applications, search all applications, or access another user's application or documents. The backend checks these permissions even if a URL or request is changed manually.
+
+## 3. Admin Security
+
+Only an authenticated Admin can view Recent Applications, search by LOS number, applicant name, or mobile number, open applications, and update application data. Admin access is enforced by the backend; hiding a screen does not grant permission.
+
 ## How to Log In
 
 ### Step 1 - Open the Application
@@ -121,7 +137,7 @@ The current format is `LOS-YYYY-########`, where `YYYY` is the year and the fina
 
 > **DEMO / DEVELOPMENT ONLY:** The current demo credentials are username `admin` and password `admin`. Do not use these credentials for a real service.
 
-The login screen currently checks these credentials in the browser. This is not a secure production login.
+The backend verifies these credentials and returns a temporary demo access token. This is not a secure production identity system.
 
 ## Admin Dashboard and Recent Applications
 
@@ -159,6 +175,14 @@ Both User and Admin can select **Logout** in the top navigation. This clears the
 | Session expired or returned to login | Log in again. The demo login is stored in the current browser session and the UI clears it after an API authorization error. |
 | Upload failed | Choose a non-empty PDF/JPG/JPEG/PNG file up to 10 MB and retry. |
 | Applications or documents are unavailable after a restart | Ask the application operator to confirm PostgreSQL is running and that the same database and document-storage directory are configured. |
+
+## 7. Security Best Practices for Users
+
+- Do not share demo login credentials or OTPs.
+- Log out after completing work, especially on a shared computer.
+- Upload only supported PDF, JPG/JPEG, or PNG files no larger than 10 MB.
+- Do not attempt to open or modify applications or documents that do not belong to you.
+- Do not enter real customer information into this demonstration environment unless it has been approved for that use.
 
 ## Important Notes
 

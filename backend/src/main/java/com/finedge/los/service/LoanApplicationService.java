@@ -73,6 +73,9 @@ public class LoanApplicationService {
         }
 
             String normalizedSearch = search == null ? "" : search.trim().toLowerCase();
+            if (normalizedSearch.length() > 100) {
+                throw new IllegalArgumentException("Search value is too long");
+            }
             ApplicationStatus normalizedStatus = status == null || status.isBlank() || "ALL".equalsIgnoreCase(status)
                 ? null
                 : ApplicationStatus.valueOf(status.trim().toUpperCase());

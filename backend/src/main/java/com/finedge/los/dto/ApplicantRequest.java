@@ -4,11 +4,13 @@ import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.Size;
 
 import java.time.LocalDate;
 
 public class ApplicantRequest {
     @NotBlank(message = "Full name is required")
+    @Size(max = 120, message = "Full name is too long")
     private String fullName;
 
     @NotNull(message = "Date of birth is required")
@@ -31,12 +33,15 @@ public class ApplicantRequest {
     private String workEmail;
 
     @NotBlank(message = "Residential address is required")
+    @Size(max = 300, message = "Residential address is too long")
     private String residentialAddress;
 
     @NotBlank(message = "City is required")
+    @Size(max = 80, message = "City is too long")
     private String city;
 
     @NotBlank(message = "State is required")
+    @Size(max = 80, message = "State is too long")
     private String state;
 
     @NotBlank(message = "Pincode is required")

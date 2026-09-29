@@ -22,19 +22,7 @@ public class LocalDocumentStorageService implements DocumentStorageService {
     @Override
     public String store(MultipartFile file) throws IOException {
         Files.createDirectories(baseDirectory);
-        String originalName = file.getOriginalFilename() == null ? "document" : file.getOriginalFilename();
-        String normalizedName = originalName.replace('\\', '/');
-        String safeName = normalizedName.substring(normalizedName.lastIndexOf('/') + 1)
-                .replaceAll("[<>:\"|?*\\p{Cntrl}]", "_")
-                .strip()
-                .replaceAll("[. ]+$", "");
-        if (safeName.isBlank() || ".".equals(safeName) || "..".equals(safeName)) {
-            safeName = "document";
-        }
-        if (safeName.length() > 120) {
-            safeName = safeName.substring(0, 120);
-        }
-        String storageKey = UUID.randomUUID() + "-" + safeName;
+        String storageKey = UUID.randomUUID().toString();
         try (var input = file.getInputStream()) {
             Files.copy(input, resolve(storageKey), StandardCopyOption.REPLACE_EXISTING);
         }

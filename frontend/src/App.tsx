@@ -627,6 +627,13 @@ function App() {
   }, [employment.monthlyInHandSalary, loanDetails.requestedLoanAmount, creditScore]);
 
   const handleLogout = () => {
+    const authSession = readStoredAuth();
+    if (authSession) {
+      void fetch('/api/auth/logout', {
+        method: 'POST',
+        headers: buildAuthHeaders(authSession)
+      });
+    }
     clearAuth();
     setSession(null);
   };

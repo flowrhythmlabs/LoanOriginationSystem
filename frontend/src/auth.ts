@@ -2,6 +2,7 @@ export type AuthRole = 'USER' | 'ADMIN';
 
 export type AuthSession = {
   authenticated: true;
+  token: string;
   role: AuthRole;
   mobile?: string;
   username?: string;
@@ -26,6 +27,7 @@ export const readStoredAuth = (): AuthSession | null => {
     }
     return {
       authenticated: true,
+      token: typeof parsed.token === 'string' ? parsed.token : '',
       role: parsed.role === 'ADMIN' ? 'ADMIN' : 'USER',
       mobile: parsed.mobile,
       username: parsed.username
@@ -49,12 +51,8 @@ export const buildAuthHeaders = (session: AuthSession | null) => {
     return headers;
   }
 
-  headers.set('X-Role', session.role);
-  if (session.role === 'USER' && session.mobile) {
-    headers.set('X-Mobile', session.mobile);
-  }
-  if (session.role === 'ADMIN' && session.username) {
-    headers.set('X-Username', session.username);
+  if (session.token) {
+    headers.set('Authorization', `Bearer ${session.token}`);
   }
   return headers;
 };

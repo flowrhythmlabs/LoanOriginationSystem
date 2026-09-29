@@ -30,11 +30,15 @@ import java.util.Set;
 
 @RestController
 @RequestMapping("/api")
-@CrossOrigin(origins = "*")
 public class LoanApplicationController {
 
     private static final Logger logger = LoggerFactory.getLogger(LoanApplicationController.class);
     private static final Set<String> ALLOWED_CONTENT_TYPES = Set.of("application/pdf", "image/jpeg", "image/png", "image/jpg");
+        private static final Map<String, Set<String>> ALLOWED_EXTENSIONS = Map.of(
+            "application/pdf", Set.of("pdf"),
+            "image/jpeg", Set.of("jpg", "jpeg"),
+            "image/jpg", Set.of("jpg", "jpeg"),
+            "image/png", Set.of("png"));
     private static final long MAX_FILE_SIZE = 10 * 1024 * 1024L;
 
     private final LoanApplicationService service;
@@ -88,13 +92,13 @@ public class LoanApplicationController {
         String originalFileName = file == null ? null : file.getOriginalFilename();
         long fileSize = file == null ? 0 : file.getSize();
         String contentType = file == null ? null : file.getContentType();
-        logger.debug("Document upload controller entered: applicationId={} documentType={} fileName={} fileSize={} contentType={}",
-            id, documentType, originalFileName, fileSize, contentType);
+        logger.debug("Document upload request received: applicationId={} documentType={} fileSize={} contentType={}",
+            id, documentType, fileSize, contentType);
         try {
             return saveDocument(id, file, documentType, documentName);
         } catch (RuntimeException ex) {
-            logger.error("Document upload failed: applicationId={} documentType={} fileName={} fileSize={} contentType={} exceptionClass={} exceptionMessage={}",
-                    id, documentType, originalFileName, fileSize, contentType, ex.getClass().getName(), ex.getMessage(), ex);
+                logger.error("Document upload failed: applicationId={} documentType={} fileSize={} contentType={} exceptionClass={}",
+                    id, documentType, fileSize, contentType, ex.getClass().getName(), ex);
             throw ex;
         }
     }
@@ -109,11 +113,18 @@ public class LoanApplicationController {
         if (contentType == null || !ALLOWED_CONTENT_TYPES.contains(contentType.toLowerCase(Locale.ROOT))) {
             throw new IllegalArgumentException("File type is not supported. Please upload a PDF, JPG, or PNG file.");
         }
+        String extension = extensionOf(file.getOriginalFilename());
+        if (!ALLOWED_EXTENSIONS.get(contentType.toLowerCase(Locale.ROOT)).contains(extension)) {
+            throw new IllegalArgumentException("File extension does not match the declared file type.");
+        }
         if (file.getSize() > MAX_FILE_SIZE) {
             throw new IllegalArgumentException("File size exceeds the 10 MB limit.");
         }
         if (documentName == null || documentName.isBlank()) {
             throw new IllegalArgumentException("Document name is required");
+        }
+        if (documentName.length() > 100) {
+            throw new IllegalArgumentException("Document name is too long");
         }
 
         Document.DocumentType parsedType;
@@ -133,9 +144,9 @@ public class LoanApplicationController {
         String existingStorageKey = existingDocument == null ? null : existingDocument.getFilePath();
         String storageKey;
         try {
-            logger.debug("Document file persistence started: applicationId={} documentType={} fileName={} fileSize={}", id, parsedType, originalFileName, fileSize);
+            logger.debug("Document file persistence started: applicationId={} documentType={} fileSize={}", id, parsedType, fileSize);
             storageKey = documentStorage.store(file);
-            logger.debug("Document file persistence completed: applicationId={} documentType={} fileName={} storageKey={}", id, parsedType, originalFileName, storageKey);
+            logger.debug("Document file persistence completed: applicationId={} documentType={}", id, parsedType);
         } catch (IOException ex) {
             throw new DocumentStorageException("Document storage failed", ex);
         }
@@ -152,7 +163,7 @@ public class LoanApplicationController {
 
         Document savedDocument;
         try {
-            logger.debug("Document database persistence started: applicationId={} documentType={} fileName={}", id, parsedType, originalFileName);
+            logger.debug("Document database persistence started: applicationId={} documentType={}", id, parsedType);
             savedDocument = service.addDocument(id, document);
             logger.debug("Document database persistence completed: applicationId={} documentType={} documentId={}", id, parsedType, savedDocument.getId());
         } catch (RuntimeException ex) {
@@ -212,6 +223,19 @@ public class LoanApplicationController {
             .strip()
             .replaceAll("[. ]+$", "");
         return fileName.isBlank() ? "document" : fileName;
+    }
+
+    private String extensionOf(String originalName) {
+        if (originalName == null) {
+            return "";
+        }
+        String normalized = originalName.replace('\\', '/');
+        int lastDot = normalized.lastIndexOf('.');
+        int lastSlash = normalized.lastIndexOf('/');
+        if (lastDot <= lastSlash || lastDot == normalized.length() - 1) {
+            return "";
+        }
+        return normalized.substring(lastDot + 1).toLowerCase(Locale.ROOT);
     }
 
     @PostMapping("/applications/{id}/submit")

@@ -3,6 +3,7 @@ package com.finedge.los.dto;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
 
 import java.math.BigDecimal;
 
@@ -10,7 +11,9 @@ public class EmploymentRequest {
     @NotNull(message = "Employment type is required")
     private String employmentType;
 
+    @Size(max = 150, message = "Employer name is too long")
     private String employerName;
+    @Size(max = 120, message = "Designation is too long")
     private String designation;
     private Double totalWorkExperienceYears;
     private Double currentEmployerExperienceYears;
@@ -18,6 +21,7 @@ public class EmploymentRequest {
     @DecimalMin(value = "0.01", message = "Monthly in-hand salary must be greater than zero")
     private BigDecimal monthlyInHandSalary;
 
+    @DecimalMin(value = "0.00", message = "Monthly gross salary must not be negative")
     private BigDecimal monthlyGrossSalary;
 
     public EmploymentRequest() {}

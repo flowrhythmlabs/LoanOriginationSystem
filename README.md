@@ -8,6 +8,74 @@ FinEdge LOS is a development/demo application for capturing loan applicant, empl
 
 The frontend is a single-page application. Its progress indicator labels five stages, but the form sections are displayed together rather than as separate wizard pages.
 
+# Security
+
+This project implements practical security hardening with the existing Spring Boot, Spring Security, JPA, PostgreSQL, and React stack. No new Maven or npm dependencies were added. No application can be guaranteed to be completely vulnerability-free.
+
+## Authentication Security
+
+- User login validates a 10-digit mobile number and the fixed demo OTP.
+- Admin login validates the fixed demo `admin` / `admin` credentials.
+- Successful login issues a short-lived, server-generated bearer token held in browser `sessionStorage`.
+- Logout revokes the token and clears the browser session.
+- The token store is in memory and is lost on backend restart; this is suitable only for this demo.
+
+## Authorization
+
+- `USER` and `ADMIN` roles are assigned by the backend after credential validation.
+- Protected APIs require a valid bearer token; caller-supplied role, mobile, and username headers are not trusted.
+- Admin listing, counts, and search are restricted to `ADMIN`.
+- Application and document operations perform application ownership checks for users; admins may manage applications.
+
+## Data Protection
+
+- PostgreSQL connection values are supplied through environment variables.
+- Document storage is configured through `DOCUMENT_STORAGE_PATH` and is outside the frontend public directory by default.
+- API error responses do not return stack traces, filesystem paths, SQL, or secrets.
+
+## Document Security
+
+- Uploads are limited to 10 MB per file and 20 MB per request.
+- PDF, JPG/JPEG, and PNG MIME types must agree with the filename extension.
+- Storage uses opaque generated filenames; path traversal and arbitrary storage keys are rejected.
+- Download, list, replace, and delete operations require authorization through the owning application.
+
+## API Security
+
+- Backend Bean Validation and service validation cover mobile, PAN, email, text lengths, salary, loan amount, interest rate, and tenure.
+- Admin search uses parameterized Spring Data JPA queries and has a length limit.
+- CORS allows only local frontend origins on port 5173; wildcard origins are not enabled.
+- CSRF is disabled because the API is stateless bearer-token authentication rather than cookie authentication. Production HTTPS and a reviewed token/session design remain necessary.
+- Spring Security adds content-type, frame, and referrer protections. HSTS is disabled for local HTTP development.
+
+## Logging Security
+
+Routine logging does not include passwords, OTPs, bearer tokens, document contents, original document names, or storage keys. Error diagnostics remain server-side and should be reviewed before production logging is enabled.
+
+## Secrets Management
+
+Use environment variables such as `DB_USERNAME`, `DB_PASSWORD`, and `DOCUMENT_STORAGE_PATH`. `.env` files, generated files, uploads, `target`, and `node_modules` are ignored by Git. Do not commit real passwords, API keys, private keys, uploaded documents, or local databases.
+
+## Security Controls Checklist
+
+- [x] Backend authentication with server-issued tokens
+- [x] Role-based authorization and application ownership checks
+- [x] Document authorization and secure file path handling
+- [x] Backend input and upload validation
+- [x] Parameterized database search
+- [x] Safe error responses and reduced sensitive logging
+- [x] Environment-based database configuration
+- [x] Restricted CORS and documented stateless CSRF strategy
+- [x] Security headers appropriate for local HTTP development
+- [ ] Production-grade OTP provider and password management
+- [ ] Distributed rate limiting and account lockout
+- [ ] Malware/content scanning for uploads
+- [ ] Encryption at rest and production HTTPS infrastructure
+
+## Security Limitations
+
+The OTP and admin credentials are demo values and are intentionally retained for compatibility. Tokens are in-memory and not suitable for a multi-instance deployment. Robust distributed rate limiting, malware scanning, encryption at rest, production identity management, and HTTPS infrastructure require operational controls or additional components and were not added under the no-new-dependencies requirement.
+
 ## 2. Current Features
 
 - A browser login screen with User and Admin choices. Login is currently simulated in the frontend; see [Authentication and limitations](#8-authentication-and-limitations).
@@ -51,7 +119,7 @@ backend/
     entity/       JPA-persisted application data
     exception/    API exception handling
     repository/   Spring Data repositories
-    security/     Demo identity-header filter
+    security/     Server-issued demo token authentication
     service/      Application, document, mock credit, PAN, and KYC logic
   src/main/resources/  Runtime and test configuration
   data/documents/      Uploaded document files at runtime
@@ -101,6 +169,19 @@ cd backend
 mvn spring-boot:run
 ```
 
+On PowerShell, configure the PostgreSQL password in the process environment before starting. Do not put the real password in `application.yml` or commit it to the repository:
+
+```powershell 
+$env:DB_HOST = "localhost"
+$env:DB_PORT = "5432"
+$env:DB_NAME = "loan_origination"
+$env:DB_USERNAME = "postgres"
+$env:DB_PASSWORD = "LOS123"
+mvn spring-boot:run
+```
+
+If `DB_PASSWORD` is missing, startup stops with a configuration error instead of attempting an empty-password database connection. If Maven cannot resolve the `spring-boot` prefix, run the command from `backend/` or use `mvn org.springframework.boot:spring-boot-maven-plugin:3.3.3:run`.
+
 The backend listens on `http://localhost:8080`.
 
 Frontend:
@@ -115,15 +196,15 @@ Vite uses port `5173` by default and proxies `/api` requests to `http://localhos
 
 ## 8. Authentication and Limitations
 
-The visible login screen currently performs demo checks in the frontend and stores the selected role in browser `sessionStorage`. It does not call the backend login endpoints and does not receive a server-issued session or token.
+The visible login screen calls the backend demo login endpoints and stores the returned server-issued bearer token in browser `sessionStorage`.
 
 **User demo login:** enter exactly 10 digits and use OTP `123456`. Non-digit input and invalid pasted values are rejected. The OTP is hardcoded for the demo; no SMS is sent.
 
 **Admin demo login:** username `admin`, password `admin`. These values are hardcoded in the frontend and backend demo service.
 
-The backend also has `POST /api/auth/login/user` and `POST /api/auth/login/admin` endpoints, but the current login page does not call them. Those endpoints return role/user information and do not issue a token. Application API requests use `X-Role`, `X-Mobile`, and `X-Username` headers. The current filter trusts these caller-supplied headers; they are not a secure authentication mechanism. Role selection in the UI is not production-grade access control.
+The backend login endpoints return role/user information and a short-lived token. Application API requests use `Authorization: Bearer ...`; caller-supplied identity headers are ignored. Role selection in the UI remains a demo convenience, not a production identity system.
 
-Logout clears the browser session value and returns the UI to the login screen. The backend is stateless and has no server session to invalidate.
+Logout revokes the in-memory bearer token where the backend is available, clears the browser session value, and returns the UI to the login screen.
 
 ## 9. User Application Workflow
 
@@ -224,12 +305,13 @@ Document bytes are stored on the filesystem under `backend/data/documents/` by d
 
 ## 13. Backend API Overview
 
-The frontend reaches the API through Vite's `/api` proxy. Application endpoints require an authenticated principal from the demo identity-header filter; the filter trusts caller-provided identity headers and is for local demonstration only. Admin listing is restricted by the service to the Admin role; application detail access checks the User mobile against the applicant. Mock endpoints are permitted without authentication. The current UI login does not call the login endpoints described below.
+The frontend reaches the API through Vite's `/api` proxy. Protected application, document, KYC, and mock endpoints require a valid server-issued bearer token. Admin listing is restricted by the service to the Admin role; application detail access checks the authenticated User mobile against the applicant. The current UI calls the login endpoints described below.
 
 | Method and endpoint | Purpose and request/response |
 | --- | --- |
-| `POST /api/auth/login/user` | Public demo login. JSON body: `mobileNumber`, `otp`. Returns role, normalized mobile number, and message; invalid credentials return 401. No token is issued. |
-| `POST /api/auth/login/admin` | Public demo login. JSON body: `username`, `password`. Returns role, username, and message; invalid credentials return 401. No token is issued. |
+| `POST /api/auth/login/user` | Public demo login. JSON body: `mobileNumber`, `otp`. Returns role, normalized mobile number, a short-lived bearer token, and message; invalid credentials return 401. |
+| `POST /api/auth/login/admin` | Public demo login. JSON body: `username`, `password`. Returns role, username, a short-lived bearer token, and message; invalid credentials return 401. |
+| `POST /api/auth/logout` | Revokes the bearer token supplied in the `Authorization` header. |
 | `GET /api/applications?search={term}&status={status}` | Lists matching application summaries; intended for Admin. Search is optional and matches LOS number, applicant name, or mobile. Status is optional (`ALL`, `DRAFT`, or `SUBMITTED`). Returns an array with ID, LOS number, applicant name and mobile, loan type, status, creation time, score, and amount. |
 | `GET /api/applications/counts` | Returns total, draft, under-review, and submitted application counts for the dashboard. |
 | `POST /api/applications` | Creates a draft. JSON body has `applicant`, `employment`, and `loanDetails`; returns application details including ID, status, and any LOS number. |
@@ -314,7 +396,7 @@ Uploads must be non-empty PDF/JPG/JPEG/PNG files up to 10 MB. All four required 
 
 ## 18. Security Notes
 
-This is a demo application. The static OTP, hardcoded Admin credentials, client-side role selection, and caller-supplied role headers are not suitable for production. The backend identity filter trusts `X-Role`, `X-Mobile`, and `X-Username`; do not expose this service as a secured lending system. Replace it with server-verified authentication, issued/validated credentials or tokens, and real authorization before deployment.
+This is a demo application. The static OTP, hardcoded Admin credentials, in-memory token store, and client-side role selection are not suitable for production. The backend requires server-issued bearer tokens and ignores the old caller-supplied identity headers, but production still needs a real identity provider, durable session/token management, and operational security controls.
 
 Do not put real Signzy credentials or other secrets in source control. Store secrets in an appropriate secret manager/environment and implement a real provider integration before using external KYC. Current Signzy configuration values do not activate a real integration.
 

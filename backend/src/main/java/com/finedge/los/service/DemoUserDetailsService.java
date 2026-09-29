@@ -4,6 +4,7 @@ import org.springframework.security.core.userdetails.User;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
 
 import java.util.Map;
@@ -13,14 +14,15 @@ import java.util.concurrent.ConcurrentHashMap;
 public class DemoUserDetailsService implements UserDetailsService {
     private static final String DEFAULT_USER_OTP = "123456";
     private final Map<String, UserDetails> users = new ConcurrentHashMap<>();
+    private final BCryptPasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
 
     public DemoUserDetailsService() {
-        users.put("admin", User.withUsername("admin").password("{noop}admin").roles("ADMIN").build());
+        users.put("admin", User.withUsername("admin").password(passwordEncoder.encode("admin")).roles("ADMIN").build());
     }
 
     public void registerUser(String mobileNumber, String otp) {
         String username = "USER_" + normalizeMobile(mobileNumber);
-        users.put(username, User.withUsername(username).password("{noop}" + otp).roles("USER").build());
+        users.put(username, User.withUsername(username).password(passwordEncoder.encode(otp)).roles("USER").build());
     }
 
     public boolean validateUserOtp(String mobileNumber, String otp) {
@@ -28,14 +30,14 @@ public class DemoUserDetailsService implements UserDetailsService {
         String expectedOtp = DEFAULT_USER_OTP;
         String username = "USER_" + normalizedMobile;
         if (users.containsKey(username)) {
-            expectedOtp = users.get(username).getPassword().replace("{noop}", "");
+            return otp != null && passwordEncoder.matches(otp, users.get(username).getPassword());
         }
         return otp != null && otp.equals(expectedOtp);
     }
 
     public boolean validateAdmin(String username, String password) {
         UserDetails user = users.get(username);
-        return user != null && "admin".equals(username) && "admin".equals(password);
+        return user != null && "admin".equals(username) && passwordEncoder.matches(password, user.getPassword());
     }
 
     @Override

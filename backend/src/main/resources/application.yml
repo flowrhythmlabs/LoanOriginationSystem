@@ -8,7 +8,7 @@ spring:
     url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:loan_origination}
     driver-class-name: org.postgresql.Driver
     username: ${DB_USERNAME:postgres}
-    password: ${DB_PASSWORD:}
+    password: ${DB_PASSWORD}
   jpa:
     hibernate:
       ddl-auto: update
@@ -48,5 +48,5 @@ mock:
 
 logging:
   level:
-    org.springframework.security: INFO
-    com.finedge: DEBUG
+    org.springframework.security: WARN
+    com.finedge: INFO

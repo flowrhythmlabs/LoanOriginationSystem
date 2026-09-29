@@ -77,9 +77,23 @@ export function LoginPage({ onAuthenticated }: { onAuthenticated: (session: Auth
     }
 
     setIsSubmitting(true);
-    const session: AuthSession = { authenticated: true, role: 'USER', mobile };
-    persistAuth(session);
-    onAuthenticated(session);
+    try {
+      const response = await fetch('/api/auth/login/user', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mobileNumber: mobile, otp: userState.otp })
+      });
+      const result = await response.json().catch(() => null);
+      if (!response.ok || !result?.token) {
+        throw new Error(result?.message || 'Login failed.');
+      }
+      const session: AuthSession = { authenticated: true, token: result.token, role: 'USER', mobile };
+      persistAuth(session);
+      onAuthenticated(session);
+    } catch (error) {
+      setUserState((prev) => ({ ...prev, authError: error instanceof Error ? error.message : 'Login failed.' }));
+      setIsSubmitting(false);
+    }
   };
 
   const onAdminLogin = async () => {
@@ -100,9 +114,23 @@ export function LoginPage({ onAuthenticated }: { onAuthenticated: (session: Auth
     }
 
     setIsSubmitting(true);
-    const session: AuthSession = { authenticated: true, role: 'ADMIN', username };
-    persistAuth(session);
-    onAuthenticated(session);
+    try {
+      const response = await fetch('/api/auth/login/admin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password: adminState.password })
+      });
+      const result = await response.json().catch(() => null);
+      if (!response.ok || !result?.token) {
+        throw new Error(result?.message || 'Login failed.');
+      }
+      const session: AuthSession = { authenticated: true, token: result.token, role: 'ADMIN', username };
+      persistAuth(session);
+      onAuthenticated(session);
+    } catch (error) {
+      setAdminState((prev) => ({ ...prev, authError: error instanceof Error ? error.message : 'Login failed.' }));
+      setIsSubmitting(false);
+    }
   };
 
   return (

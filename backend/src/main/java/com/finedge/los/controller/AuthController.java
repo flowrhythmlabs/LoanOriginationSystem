@@ -2,6 +2,7 @@ package com.finedge.los.controller;
 
 import com.finedge.los.dto.AuthRequest;
 import com.finedge.los.service.DemoUserDetailsService;
+import com.finedge.los.security.DemoTokenService;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -10,12 +11,13 @@ import java.util.Map;
 
 @RestController
 @RequestMapping("/api")
-@CrossOrigin(origins = "*")
 public class AuthController {
     private final DemoUserDetailsService demoUserDetailsService;
+    private final DemoTokenService tokenService;
 
-    public AuthController(DemoUserDetailsService demoUserDetailsService) {
+    public AuthController(DemoUserDetailsService demoUserDetailsService, DemoTokenService tokenService) {
         this.demoUserDetailsService = demoUserDetailsService;
+        this.tokenService = tokenService;
     }
 
     @PostMapping("/auth/login/user")
@@ -33,6 +35,7 @@ public class AuthController {
         return ResponseEntity.ok(Map.of(
                 "role", "USER",
             "mobileNumber", mobileNumber,
+            "token", tokenService.issue(mobileNumber, "USER"),
                 "message", "Login successful"
         ));
     }
@@ -50,7 +53,16 @@ public class AuthController {
         return ResponseEntity.ok(Map.of(
                 "role", "ADMIN",
                 "username", request.getUsername(),
+                "token", tokenService.issue("admin", "ADMIN"),
                 "message", "Login successful"
         ));
+    }
+
+    @PostMapping("/auth/logout")
+    public ResponseEntity<Void> logout(@RequestHeader(value = "Authorization", required = false) String authorization) {
+        if (authorization != null && authorization.startsWith("Bearer ")) {
+            tokenService.revoke(authorization.substring(7).trim());
+        }
+        return ResponseEntity.noContent().build();
     }
 }
