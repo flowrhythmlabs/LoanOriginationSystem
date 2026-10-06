@@ -189,7 +189,8 @@ Frontend:
 ```bash
 cd frontend
 npm ci
-npm run dev -- --host 0.0.0.0
+
+
 ```
 
 Vite uses port `5173` by default and proxies `/api` requests to `http://localhost:8080`. If that port is busy, Vite automatically tries another port; use the URL printed in the terminal. Open `http://localhost:5173` when the default port is available.
@@ -205,7 +206,6 @@ The visible login screen calls the backend demo login endpoints and stores the r
 The backend login endpoints return role/user information and a short-lived token. Application API requests use `Authorization: Bearer ...`; caller-supplied identity headers are ignored. Role selection in the UI remains a demo convenience, not a production identity system.
 
 Logout revokes the in-memory bearer token where the backend is available, clears the browser session value, and returns the UI to the login screen.
-
 ## 9. User Application Workflow
 
 The form contains these sections on one page:
