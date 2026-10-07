@@ -5,8 +5,10 @@ import com.finedge.los.dto.ApplicationDetailResponse;
 import com.finedge.los.dto.CreateApplicationRequest;
 import com.finedge.los.dto.EmploymentRequest;
 import com.finedge.los.dto.LoanDetailsRequest;
+import com.finedge.los.dto.SubmitApplicationRequest;
 import com.finedge.los.controller.LoanApplicationController;
 import com.finedge.los.entity.Document;
+import com.finedge.los.entity.KycVerification;
 import com.finedge.los.entity.LoanApplication;
 import com.finedge.los.repository.ApplicantRepository;
 import com.finedge.los.repository.KycVerificationRepository;
@@ -242,8 +244,118 @@ class LoanApplicationServiceTest {
         LoanApplication application = service.createApplication(request);
         application.setStatus(LoanApplication.ApplicationStatus.DRAFT);
 
-        IllegalArgumentException exception = assertThrows(IllegalArgumentException.class, () -> service.submitApplication(application.getId()));
+        IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
+            () -> service.submitApplication(application.getId(), createSubmissionRequest("765", "ABCDE1234F")));
         assertTrue(exception.getMessage().contains("required documents"));
+    }
+
+    @Test
+    void shouldPersistManualCreditScoreAndCalculateStatus() {
+        LoanApplication application = service.createApplication(createValidRequest("ABCDE1234F"));
+        int[] scores = {300, 649, 650, 749, 750, 900};
+        String[] statuses = {"POOR", "POOR", "FAIR", "FAIR", "GOOD", "GOOD"};
+
+        for (int index = 0; index < scores.length; index++) {
+            LoanApplication updated = service.runCreditCheck(application.getId(), Integer.toString(scores[index]));
+            assertEquals(scores[index], updated.getCreditCheck().getCreditScore());
+            assertEquals(statuses[index], updated.getCreditCheck().getStatus());
+        }
+    }
+
+    @Test
+    void shouldRejectInvalidManualCreditScores() {
+        LoanApplication application = service.createApplication(createValidRequest("ABCDE1234F"));
+
+        for (String score : new String[] {"299", "901", "765.5", "letters", "76@", ""}) {
+            assertThrows(IllegalArgumentException.class, () -> service.runCreditCheck(application.getId(), score));
+        }
+        assertThrows(IllegalArgumentException.class, () -> service.runCreditCheck(application.getId(), null));
+    }
+
+    @Test
+    void shouldRejectInvalidCreditScoreDuringFinalSubmission() {
+        LoanApplication application = service.createApplication(createValidRequest("ABCDE1234F"));
+        addAllRequiredDocuments(application.getId());
+
+        IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
+            () -> service.submitApplication(application.getId(), createSubmissionRequest("765.5", "ABCDE1234F")));
+
+        assertTrue(exception.getMessage().contains("whole number"));
+    }
+
+    @Test
+    void shouldRejectSubmissionWithoutValidatedKyc() {
+        LoanApplication application = service.createApplication(createValidRequest("ABCDE1234F"));
+        addAllRequiredDocuments(application.getId());
+
+        IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
+            () -> service.submitApplication(application.getId(), createSubmissionRequest("765", "")));
+
+        assertTrue(exception.getMessage().contains("PAN number is required"));
+    }
+
+    @Test
+    void shouldSubmitWithValidCreditScoreAndPanValidation() {
+        LoanApplication application = service.createApplication(createValidRequest("ABCDE1234F"));
+        addAllRequiredDocuments(application.getId());
+
+        LoanApplication submitted = service.submitApplication(application.getId(), createSubmissionRequest("765", "abcde1234f"));
+
+        assertEquals(LoanApplication.ApplicationStatus.SUBMITTED, submitted.getStatus());
+        assertTrue(submitted.getLosNumber().startsWith("LOS-"));
+        assertEquals("GOOD", submitted.getCreditCheck().getStatus());
+        assertEquals(KycVerification.KycStatus.VALIDATION_PASSED,
+                kycVerificationRepository.findByLoanApplicationId(application.getId()).orElseThrow().getStatus());
+    }
+
+    @Test
+    void shouldRejectInvalidKycDataAtSubmission() {
+        LoanApplication application = service.createApplication(createValidRequest("ABCDE1234F"));
+        addAllRequiredDocuments(application.getId());
+
+        for (String pan : new String[] {"ABCDE12345", "ABCD1234F", "ABCDE1234", "123451234A", "ABCDEABCDE", "ABCDE-1234F", "ABCDE 1234F", ""}) {
+            SubmitApplicationRequest request = createSubmissionRequest("765", pan);
+            IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
+                    () -> service.submitApplication(application.getId(), request), pan);
+            assertTrue(exception.getMessage().contains(pan.isEmpty() ? "PAN number is required" : "valid PAN"), pan);
+        }
+    }
+
+    @Test
+    void shouldRejectKycForUnsupportedTypeOrMismatchedCustomerName() {
+        LoanApplication application = service.createApplication(createValidRequest("ABCDE1234F"));
+        addAllRequiredDocuments(application.getId());
+
+        SubmitApplicationRequest unsupportedType = createSubmissionRequest("765", "ABCDE1234F");
+        unsupportedType.setVerificationType("AADHAAR_VERIFICATION");
+        assertTrue(assertThrows(IllegalArgumentException.class,
+            () -> service.submitApplication(application.getId(), unsupportedType)).getMessage().contains("Only PAN Verification"));
+
+        SubmitApplicationRequest mismatchedName = createSubmissionRequest("765", "ABCDE1234F");
+        mismatchedName.setCustomerName("Someone Else");
+        assertTrue(assertThrows(IllegalArgumentException.class,
+                () -> service.submitApplication(application.getId(), mismatchedName)).getMessage().contains("match"));
+    }
+
+    private SubmitApplicationRequest createSubmissionRequest(String score, String pan) {
+        SubmitApplicationRequest request = new SubmitApplicationRequest();
+        request.setCreditScore(score);
+        request.setCustomerName("Amit Sharma");
+        request.setVerificationType("PAN_VERIFICATION");
+        request.setPanNumber(pan);
+        return request;
+    }
+
+    @Test
+    void shouldInvalidatePersistedKycWhenApplicantPanChanges() {
+        LoanApplication application = service.createApplication(createValidRequest("ABCDE1234F"));
+        addAllRequiredDocuments(application.getId());
+        service.submitApplication(application.getId(), createSubmissionRequest("765", "ABCDE1234F"));
+
+        service.updateApplication(application.getId(), createValidRequest("FGHIJ5678K"));
+
+        assertEquals(KycVerification.KycStatus.FAILED,
+                kycVerificationRepository.findByLoanApplicationId(application.getId()).orElseThrow().getStatus());
     }
 
     @Test
@@ -304,5 +416,14 @@ class LoanApplicationServiceTest {
         document.setContentType("application/pdf");
         document.setFileSize(2048L);
         return document;
+    }
+
+    private void addAllRequiredDocuments(Long applicationId) {
+        for (Document.DocumentType type : Document.DocumentType.values()) {
+            Document document = createDocument(type.name().toLowerCase() + ".pdf");
+            document.setDocumentType(type);
+            document.setDocumentName(type.name());
+            service.addDocument(applicationId, document);
+        }
     }
 }

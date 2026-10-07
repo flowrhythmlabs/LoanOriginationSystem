@@ -14,7 +14,7 @@ public class CreditCheck {
     private Integer creditScore;
 
     @Column(nullable = false)
-    private String bureau = "MOCK-BUREAU";
+    private String bureau = "MANUAL";
 
     @Column(nullable = false)
     private String status = "SUCCESS";

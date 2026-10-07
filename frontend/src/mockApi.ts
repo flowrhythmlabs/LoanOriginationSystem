@@ -18,7 +18,9 @@ const toApplication = (app: Json) => ({
   applicant: app.applicant,
   employmentDetails: app.employment,
   loanDetails: app.loanDetails,
-  creditCheck: app.creditScore ? { creditScore: app.creditScore } : null
+  creditCheck: app.creditScore !== null && app.creditScore !== undefined
+    ? { creditScore: app.creditScore, status: app.creditScoreStatus }
+    : null
 });
 
 const toRow = (app: Json) => ({
@@ -111,10 +113,6 @@ const handle = async (url: URL, method: string, init?: RequestInit): Promise<Res
     docs[app.id] = [];
     return json(toApplication(app), 201);
   }
-  if (path.startsWith('/api/mock/credit-score/')) {
-    return json({ pan: path.split('/').pop(), creditScore: 765, bureau: 'MockBureau', status: 'SUCCESS' });
-  }
-
   const match = path.match(/^\/api\/applications\/(\d+)(?:\/(\w+))?(?:\/(\d+))?$/);
   if (!match) {
     return null;
@@ -130,17 +128,53 @@ const handle = async (url: URL, method: string, init?: RequestInit): Promise<Res
   }
   if (!sub && method === 'PUT') {
     const data = await body();
+    if (String(data.applicant?.panNumber ?? '').toUpperCase() !== String(app.applicant?.panNumber ?? '').toUpperCase()) {
+      app.kyc = null;
+    }
     Object.assign(app, { applicant: data.applicant, employment: data.employment, loanDetails: data.loanDetails });
     return json(toApplication(app));
   }
   if (sub === 'credit-check') {
-    app.creditScore = 765;
+    const data = await body();
+    const scoreText = String(data.creditScore ?? '');
+    const score = Number(scoreText);
+    if (!/^\d+$/.test(scoreText) || score < 300 || score > 900) {
+      return json({ message: 'Credit score must be a whole number between 300 and 900.' }, 400);
+    }
+    app.creditScore = score;
+    app.creditScoreStatus = score <= 649 ? 'POOR' : score <= 749 ? 'FAIR' : 'GOOD';
     return json(toApplication(app));
   }
-  if (sub === 'kyc') {
-    return json({ status: 'VERIFIED' });
-  }
   if (sub === 'submit') {
+    const data = await body();
+    const scoreText = String(data.creditScore ?? '');
+    const score = Number(scoreText);
+    if (!/^\d+$/.test(scoreText) || score < 300 || score > 900) {
+      return json({ message: 'Credit score must be a whole number between 300 and 900.' }, 400);
+    }
+    if ((docs[app.id] ?? []).length < 4) {
+      return json({ message: 'Please upload all required documents before submitting the application.' }, 400);
+    }
+    const pan = String(data.panNumber ?? '');
+    if (!String(data.customerName ?? '').trim()) {
+      return json({ message: 'Customer name is required.' }, 400);
+    }
+    if (String(data.customerName).trim() !== String(app.applicant?.fullName ?? '').trim()) {
+      return json({ message: 'Customer name must match the application details.' }, 400);
+    }
+    if (data.verificationType !== 'PAN_VERIFICATION') {
+      return json({ message: 'Only PAN Verification is currently supported.' }, 400);
+    }
+    if (!pan) {
+      return json({ message: 'PAN number is required.' }, 400);
+    }
+    if (!/^[A-Za-z]{5}[0-9]{4}[A-Za-z]$/.test(pan)
+        || pan.toUpperCase() !== String(app.applicant?.panNumber ?? '').toUpperCase()) {
+      return json({ message: 'Enter a valid PAN in the format ABCDE1234F.' }, 400);
+    }
+    app.creditScore = score;
+    app.creditScoreStatus = score <= 649 ? 'POOR' : score <= 749 ? 'FAIR' : 'GOOD';
+    app.kyc = { status: 'VALIDATION_PASSED', verificationType: 'PAN_VERIFICATION' };
     app.status = 'SUBMITTED';
     app.losNumber ??= `LOS-2026-${String(nextLos++).padStart(8, '0')}`;
     return json(toApplication(app));

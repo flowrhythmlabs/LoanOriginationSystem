@@ -127,6 +127,36 @@ const validateMobileNumber = (mobile: string) => {
   return /^\d{10}$/.test(mobile) ? '' : 'Please enter a valid 10-digit mobile number.';
 };
 
+const validateCreditScore = (value: string) => {
+  if (!value) return 'Credit score is required.';
+  if (!/^\d+$/.test(value)) return 'Enter a whole number using digits only.';
+  const score = Number(value);
+  return score >= 300 && score <= 900 ? '' : 'Credit score must be between 300 and 900.';
+};
+
+const getCreditScoreStatus = (value: string) => {
+  const score = Number(value);
+  if (score <= 649) return 'POOR';
+  if (score <= 749) return 'FAIR';
+  return 'GOOD';
+};
+
+const validatePanNumber = (value: string) =>
+  !value ? 'PAN number is required.' : /^[A-Z]{5}[0-9]{4}[A-Z]$/.test(value) ? '' : 'Enter a valid PAN in the format ABCDE1234F.';
+
+const validateApplicantFields = (applicant: Applicant) => ({
+  fullName: !applicant.fullName.trim() ? 'Customer name is required.' : applicant.fullName.length > 120 ? 'Full name is too long.' : '',
+  dateOfBirth: applicant.dateOfBirth ? '' : 'Date of birth is required.',
+  panNumber: validatePanNumber(applicant.panNumber),
+  mobileNumber: validateMobileNumber(applicant.mobileNumber),
+  email: /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(applicant.email) ? '' : 'Enter a valid email address.',
+  workEmail: /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(applicant.workEmail) ? '' : 'Enter a valid work email address.',
+  residentialAddress: !applicant.residentialAddress.trim() ? 'Residential address is required.' : applicant.residentialAddress.length > 300 ? 'Residential address is too long.' : '',
+  city: !applicant.city.trim() ? 'City is required.' : applicant.city.length > 80 ? 'City is too long.' : '',
+  state: !applicant.state.trim() ? 'State is required.' : applicant.state.length > 80 ? 'State is too long.' : '',
+  pincode: /^[1-9][0-9]{5}$/.test(applicant.pincode) ? '' : 'Enter a valid 6-digit Indian pincode.'
+});
+
 const calculateEmi = (principal: number, annualRate: number, tenureMonths: number) => {
   if (!Number.isFinite(principal) || principal <= 0) {
     return 0;
@@ -173,10 +203,12 @@ const statusColors: Record<string, string> = {
 function App() {
   const [session, setSession] = useState<AuthSession | null>(() => readStoredAuth());
   const [applicant, setApplicant] = useState<Applicant>(initialApplicant);
+  const [applicantFieldErrors, setApplicantFieldErrors] = useState<Partial<Record<keyof Applicant, string>>>({});
   const [applicantMobileError, setApplicantMobileError] = useState('');
   const [employment, setEmployment] = useState<Employment>(initialEmployment);
   const [loanDetails, setLoanDetails] = useState<LoanDetails>(initialLoanDetails);
-  const [creditScore, setCreditScore] = useState<number | null>(765);
+  const [creditScore, setCreditScore] = useState('');
+  const [creditScoreTouched, setCreditScoreTouched] = useState(false);
   const [status, setStatus] = useState('DRAFT');
   const [submittedApplication, setSubmittedApplication] = useState<{ losNumber?: string; status?: string; createdAt?: string } | null>(null);
   const [applications, setApplications] = useState<ApplicationRow[]>([]);
@@ -185,12 +217,13 @@ function App() {
   const [filterStatus, setFilterStatus] = useState('ALL');
   const [documents, setDocuments] = useState<Record<DocumentType, DocumentEntry>>(createInitialDocuments());
   const [currentStep, setCurrentStep] = useState(1);
-  const [kycStatus, setKycStatus] = useState('Not Started');
+  const [kycStatus, setKycStatus] = useState('Not Validated');
   const [kycMessage, setKycMessage] = useState('');
+  const [kycPanTouched, setKycPanTouched] = useState(false);
+  const [verificationType, setVerificationType] = useState('PAN_VERIFICATION');
   const [applicationId, setApplicationId] = useState<number | null>(null);
   const [isCreatingApplication, setIsCreatingApplication] = useState(false);
   const applicationCreationRef = useRef<Promise<number> | null>(null);
-  const [mockKycMode, setMockKycMode] = useState('SUCCESS');
   const [validationMessage, setValidationMessage] = useState('');
   const [selectedFiles, setSelectedFiles] = useState<Record<DocumentType, string>>({
     BANK_STATEMENT: '',
@@ -213,6 +246,15 @@ function App() {
       setSession(null);
     }
     return response;
+  };
+
+  const updateApplicantField = (field: keyof Applicant, value: string) => {
+    setApplicant((current) => ({ ...current, [field]: value }));
+    setApplicantFieldErrors((current) => ({ ...current, [field]: '' }));
+    if (field === 'panNumber' || field === 'fullName') {
+      setKycStatus('Not Validated');
+      setKycMessage('');
+    }
   };
 
   useEffect(() => {
@@ -336,6 +378,7 @@ function App() {
         state: app.applicant.state,
         pincode: app.applicant.pincode
       });
+      setApplicantFieldErrors({});
       setApplicantMobileError(validateMobileNumber(app.applicant.mobileNumber));
       setEmployment({
         employmentType: app.employmentDetails.employmentType,
@@ -353,7 +396,11 @@ function App() {
         preferredTenure: app.loanDetails.preferredTenure,
         purposeOfLoan: app.loanDetails.purposeOfLoan
       });
-      setCreditScore(app.creditCheck?.creditScore ?? null);
+      setCreditScore(app.creditCheck?.creditScore === null || app.creditCheck?.creditScore === undefined ? '' : String(app.creditCheck.creditScore));
+      setCreditScoreTouched(false);
+      setKycStatus('Not Validated');
+      setKycMessage('');
+      setKycPanTouched(false);
       setStatus(app.status);
       setSubmittedApplication(app.status === 'SUBMITTED' ? app : null);
       setCurrentStep(4);
@@ -368,18 +415,22 @@ function App() {
     if (isCreatingApplication) return;
     setApplicationId(null);
     setApplicant({ ...initialApplicant });
+    setApplicantFieldErrors({});
     setApplicantMobileError('');
     setEmployment({ ...initialEmployment });
     setLoanDetails({ ...initialLoanDetails });
-    setCreditScore(765);
+    setCreditScore('');
+    setCreditScoreTouched(false);
     setStatus('DRAFT');
     setSubmittedApplication(null);
     setDocuments(createInitialDocuments());
     setSelectedFiles({ BANK_STATEMENT: '', LATEST_SALARY_SLIP: '', PREVIOUS_SALARY_SLIP: '', PAN_DOCUMENT: '' });
     setCurrentStep(1);
     setValidationMessage('');
-    setKycStatus('Not Started');
+    setKycStatus('Not Validated');
     setKycMessage('');
+    setKycPanTouched(false);
+    setVerificationType('PAN_VERIFICATION');
   };
 
   const filteredRows = applications;
@@ -461,71 +512,102 @@ function App() {
     }
   };
 
-  const handleRunCreditCheck = async () => {
-    try {
-      const response = await apiFetch(`/api/mock/credit-score/${applicant.panNumber}`);
-      const data = await response.json();
-      setCreditScore(data.creditScore);
-      setStatus('CREDIT_CHECK_COMPLETED');
-      setCurrentStep(3);
-    } catch {
-      setCreditScore(685);
+  const handleValidateKyc = () => {
+    setKycPanTouched(true);
+    if (!applicant.fullName.trim() || applicant.fullName.length > 120) {
+      setKycStatus('INVALID');
+      setKycMessage(!applicant.fullName.trim() ? 'Customer name is required.' : 'Customer name is too long.');
+      document.getElementById('applicant-fullName')?.focus();
+      return;
     }
-  };
-
-  const handleStartKyc = async (id: number) => {
-    try {
-      const response = await apiFetch(`/api/applications/${id}/kyc`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ verificationType: 'PAN_VERIFICATION', panNumber: applicant.panNumber, provider: 'SIGNZY', mockMode: mockKycMode })
-      });
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data?.message || 'KYC initiation failed');
-      }
-      const nextStatus = data.status || 'PENDING';
-      const mappedStatus = nextStatus === 'VERIFIED' ? 'Verified' : nextStatus === 'MANUAL_REVIEW' ? 'Manual Review' : nextStatus === 'FAILED' ? 'Failed' : 'In Progress';
-      const message = nextStatus === 'VERIFIED'
-        ? 'KYC verification passed.'
-        : nextStatus === 'FAILED'
-          ? 'KYC verification failed. Please retry or raise for manual review.'
-          : nextStatus === 'MANUAL_REVIEW'
-            ? 'KYC requires manual review.'
-            : 'KYC verification in progress.';
-      setKycStatus(mappedStatus);
-      setKycMessage(message);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'KYC could not be started.';
-      setKycStatus('Failed');
-      setKycMessage(message);
+    if (verificationType !== 'PAN_VERIFICATION') {
+      setKycStatus('INVALID');
+      setKycMessage('This verification type is not currently supported.');
+      return;
     }
+    const panError = validatePanNumber(applicant.panNumber);
+    if (panError) {
+      setKycStatus('INVALID');
+      setKycMessage(panError);
+      return;
+    }
+    setKycStatus('VALID');
+    setKycMessage('PAN format is valid. This is local input validation only; no external KYC provider is connected.');
   };
 
   const missingDocuments = REQUIRED_DOCUMENTS.filter((doc) => documents[doc.key].status !== 'UPLOADED');
+  const creditScoreError = creditScoreTouched || creditScore ? validateCreditScore(creditScore) : '';
+  const creditScoreStatus = creditScoreError ? '—' : getCreditScoreStatus(creditScore);
+  const kycPanError = kycPanTouched || applicant.panNumber ? validatePanNumber(applicant.panNumber) : '';
 
   const handleSubmit = async () => {
     try {
-      const mobileError = validateMobileNumber(applicant.mobileNumber);
-      if (mobileError) {
-        setApplicantMobileError(mobileError);
-        setValidationMessage(mobileError);
+      const applicantErrors = validateApplicantFields(applicant);
+      setApplicantFieldErrors(applicantErrors);
+      const firstApplicantError = (Object.keys(applicantErrors) as Array<keyof Applicant>).find((field) => applicantErrors[field]);
+      if (firstApplicantError) {
+        setApplicantMobileError(applicantErrors.mobileNumber || '');
+        setValidationMessage('Please correct the highlighted applicant details.');
+        document.getElementById(`applicant-${firstApplicantError}`)?.focus();
         return;
       }
       if (loanValidationMessage) {
         setValidationMessage(loanValidationMessage);
         return;
       }
-      const id = await ensureApplication();
+      const scoreError = validateCreditScore(creditScore);
+      setCreditScoreTouched(true);
+      if (scoreError) {
+        setValidationMessage(scoreError);
+        document.getElementById('credit-score')?.focus();
+        return;
+      }
+      if (!applicant.fullName.trim()) {
+        setValidationMessage('Customer name is required.');
+        return;
+      }
+      const panError = validatePanNumber(applicant.panNumber);
+      if (panError) {
+        setKycPanTouched(true);
+        setValidationMessage(panError);
+        document.getElementById('kyc-pan-number')?.focus();
+        return;
+      }
+      if (kycStatus !== 'VALID') {
+        setValidationMessage('Validate the customer name and PAN format before submitting.');
+        document.getElementById('kyc-pan-number')?.focus();
+        return;
+      }
       if (missingDocuments.length > 0) {
         setStatus('DOCUMENTS_PENDING');
         setValidationMessage('Please upload all required documents before submitting the application.');
         return;
       }
-      const submitResponse = await apiFetch(`/api/applications/${id}/submit`, { method: 'POST' });
+      const id = await ensureApplication();
+      const updateResponse = await apiFetch(`/api/applications/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ applicant, employment, loanDetails })
+      });
+      const updateBody = await updateResponse.json().catch(() => null);
+      if (!updateResponse.ok) {
+        throw new Error(updateBody?.message || 'Application details could not be saved.');
+      }
+      const submitResponse = await apiFetch(`/api/applications/${id}/submit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          creditScore,
+          customerName: applicant.fullName,
+          verificationType,
+          panNumber: applicant.panNumber
+        })
+      });
       if (!submitResponse.ok) {
         const errorBody = await submitResponse.json().catch(() => ({}));
-        throw new Error(errorBody?.message || 'Submission failed');
+        const fieldErrors = errorBody?.errors as Record<string, string> | undefined;
+        const fieldMessage = fieldErrors?.panNumber || fieldErrors?.customerName || fieldErrors?.verificationType || fieldErrors?.creditScore;
+        throw new Error(fieldMessage || errorBody?.message || 'Submission failed');
       }
       const submitted = await submitResponse.json();
       setSubmittedApplication({
@@ -689,23 +771,26 @@ function App() {
         <section className="card form-card">
           <h2>Applicant Details</h2>
           <div className="field-grid">
-            <label>Full Name<input value={applicant.fullName} onChange={(e) => setApplicant({ ...applicant, fullName: e.target.value })} /></label>
-            <label>Date of Birth<input type="date" value={applicant.dateOfBirth} onChange={(e) => setApplicant({ ...applicant, dateOfBirth: e.target.value })} /></label>
-            <label>PAN Number<input value={applicant.panNumber} onChange={(e) => setApplicant({ ...applicant, panNumber: e.target.value.toUpperCase() })} /></label>
-            <label>Mobile Number<input
+            <label htmlFor="applicant-fullName">Full Name<input id="applicant-fullName" value={applicant.fullName} aria-invalid={Boolean(applicantFieldErrors.fullName)} onChange={(e) => updateApplicantField('fullName', e.target.value)} />{applicantFieldErrors.fullName && <span role="alert" className="field-error">{applicantFieldErrors.fullName}</span>}</label>
+            <label htmlFor="applicant-dateOfBirth">Date of Birth<input id="applicant-dateOfBirth" type="date" value={applicant.dateOfBirth} aria-invalid={Boolean(applicantFieldErrors.dateOfBirth)} onChange={(e) => updateApplicantField('dateOfBirth', e.target.value)} />{applicantFieldErrors.dateOfBirth && <span role="alert" className="field-error">{applicantFieldErrors.dateOfBirth}</span>}</label>
+            <label htmlFor="applicant-panNumber">PAN Number<input id="applicant-panNumber" value={applicant.panNumber} aria-invalid={Boolean(applicantFieldErrors.panNumber)} onChange={(e) => updateApplicantField('panNumber', e.target.value.toUpperCase())} />{applicantFieldErrors.panNumber && <span role="alert" className="field-error">{applicantFieldErrors.panNumber}</span>}</label>
+            <label htmlFor="applicant-mobileNumber">Mobile Number<input
+              id="applicant-mobileNumber"
               type="tel"
               inputMode="numeric"
               maxLength={10}
               value={applicant.mobileNumber}
-              aria-invalid={Boolean(applicantMobileError)}
+              aria-invalid={Boolean(applicantMobileError || applicantFieldErrors.mobileNumber)}
               onChange={(event) => {
                 const value = event.target.value;
                 if (/\D/.test(value)) {
                   setApplicantMobileError('Mobile number must contain digits only.');
+                  setApplicantFieldErrors((current) => ({ ...current, mobileNumber: 'Mobile number must contain digits only.' }));
                   return;
                 }
                 setApplicant({ ...applicant, mobileNumber: value.slice(0, 10) });
                 setApplicantMobileError('');
+                setApplicantFieldErrors((current) => ({ ...current, mobileNumber: '' }));
               }}
               onPaste={(event) => {
                 if (/\D/.test(event.clipboardData.getData('text'))) {
@@ -713,13 +798,13 @@ function App() {
                   setApplicantMobileError('Mobile number must contain digits only.');
                 }
               }}
-            />{applicantMobileError && <span role="alert" style={{ color: '#a61d1d', fontSize: 12 }}>{applicantMobileError}</span>}</label>
-            <label>Email ID<input type="email" value={applicant.email} onChange={(e) => setApplicant({ ...applicant, email: e.target.value })} /></label>
-            <label>Work Email ID<input type="email" value={applicant.workEmail} onChange={(e) => setApplicant({ ...applicant, workEmail: e.target.value })} /></label>
-            <label className="full-width">Residential Address<input value={applicant.residentialAddress} onChange={(e) => setApplicant({ ...applicant, residentialAddress: e.target.value })} /></label>
-            <label>City<input value={applicant.city} onChange={(e) => setApplicant({ ...applicant, city: e.target.value })} /></label>
-            <label>State<input value={applicant.state} onChange={(e) => setApplicant({ ...applicant, state: e.target.value })} /></label>
-            <label>Pincode<input value={applicant.pincode} onChange={(e) => setApplicant({ ...applicant, pincode: e.target.value })} /></label>
+            />{(applicantFieldErrors.mobileNumber || applicantMobileError) && <span role="alert" className="field-error">{applicantFieldErrors.mobileNumber || applicantMobileError}</span>}</label>
+            <label htmlFor="applicant-email">Email ID<input id="applicant-email" type="email" value={applicant.email} aria-invalid={Boolean(applicantFieldErrors.email)} onChange={(e) => updateApplicantField('email', e.target.value)} />{applicantFieldErrors.email && <span role="alert" className="field-error">{applicantFieldErrors.email}</span>}</label>
+            <label htmlFor="applicant-workEmail">Work Email ID<input id="applicant-workEmail" type="email" value={applicant.workEmail} aria-invalid={Boolean(applicantFieldErrors.workEmail)} onChange={(e) => updateApplicantField('workEmail', e.target.value)} />{applicantFieldErrors.workEmail && <span role="alert" className="field-error">{applicantFieldErrors.workEmail}</span>}</label>
+            <label className="full-width" htmlFor="applicant-residentialAddress">Residential Address<input id="applicant-residentialAddress" value={applicant.residentialAddress} aria-invalid={Boolean(applicantFieldErrors.residentialAddress)} onChange={(e) => updateApplicantField('residentialAddress', e.target.value)} />{applicantFieldErrors.residentialAddress && <span role="alert" className="field-error">{applicantFieldErrors.residentialAddress}</span>}</label>
+            <label htmlFor="applicant-city">City<input id="applicant-city" value={applicant.city} aria-invalid={Boolean(applicantFieldErrors.city)} onChange={(e) => updateApplicantField('city', e.target.value)} />{applicantFieldErrors.city && <span role="alert" className="field-error">{applicantFieldErrors.city}</span>}</label>
+            <label htmlFor="applicant-state">State<input id="applicant-state" value={applicant.state} aria-invalid={Boolean(applicantFieldErrors.state)} onChange={(e) => updateApplicantField('state', e.target.value)} />{applicantFieldErrors.state && <span role="alert" className="field-error">{applicantFieldErrors.state}</span>}</label>
+            <label htmlFor="applicant-pincode">Pincode<input id="applicant-pincode" value={applicant.pincode} aria-invalid={Boolean(applicantFieldErrors.pincode)} onChange={(e) => updateApplicantField('pincode', e.target.value)} />{applicantFieldErrors.pincode && <span role="alert" className="field-error">{applicantFieldErrors.pincode}</span>}</label>
           </div>
         </section>
 
@@ -744,52 +829,69 @@ function App() {
 
         <section className="card form-card">
           <h2>Credit Score</h2>
-          <div className="score-box">
-            <div>
-              <span className="label">Credit Score</span>
-              <strong>{creditScore ?? '—'}</strong>
-            </div>
-            <div className="badge success">Status: GOOD</div>
+          <div className="field-grid">
+            <label htmlFor="credit-score">Credit Score
+              <input
+                id="credit-score"
+                type="text"
+                inputMode="numeric"
+                autoComplete="off"
+                value={creditScore}
+                aria-invalid={Boolean(creditScoreError)}
+                onChange={(event) => {
+                  setCreditScore(event.target.value);
+                  setCreditScoreTouched(true);
+                }}
+              />
+              {creditScoreError && <span role="alert" className="field-error">{creditScoreError}</span>}
+            </label>
           </div>
-          <button className="primary" onClick={handleRunCreditCheck}>Run Mock Credit Check</button>
+          <div className="score-box" style={{ marginTop: 18 }}>
+            <span>Status: <strong className="score-status">{creditScoreStatus}</strong></span>
+          </div>
         </section>
 
         <section className="card form-card">
           <h2>KYC Verification</h2>
           <div className="field-grid">
-            <label>Customer
+            <label>Customer Name
               <input value={applicant.fullName} readOnly />
             </label>
             <label>Verification Type
-              <input value="PAN_VERIFICATION" readOnly />
-            </label>
-          </div>
-          <div className="field-grid" style={{ marginTop: 18 }}>
-            <label>Mock KYC Mode
-              <select value={mockKycMode} onChange={(e) => setMockKycMode(e.target.value)}>
-                <option value="SUCCESS">SUCCESS</option>
-                <option value="FAILED">FAILED</option>
-                <option value="MANUAL">MANUAL</option>
+              <select value={verificationType} onChange={(event) => {
+                setVerificationType(event.target.value);
+                setKycStatus('Not Validated');
+              }}>
+                <option value="PAN_VERIFICATION">PAN Verification</option>
               </select>
+            </label>
+            <label htmlFor="kyc-pan-number">PAN Number
+              <input
+                id="kyc-pan-number"
+                value={applicant.panNumber}
+                autoCapitalize="characters"
+                maxLength={10}
+                aria-invalid={Boolean(kycPanError)}
+                onChange={(event) => {
+                  setApplicant({ ...applicant, panNumber: event.target.value.toUpperCase() });
+                  setKycPanTouched(true);
+                  setKycStatus('Not Validated');
+                  setKycMessage('');
+                }}
+              />
+              {kycPanError && <span role="alert" className="field-error">{kycPanError}</span>}
             </label>
           </div>
           <div className="inline-actions" style={{ marginTop: 18 }}>
-            <button className="primary" onClick={() => {
-              if (applicationId) {
-                setKycMessage(`Mock mode: ${mockKycMode}`);
-                handleStartKyc(applicationId);
-              } else {
-                setKycMessage('Create or select an application first.');
-              }
-            }}>Start KYC Verification</button>
+            <button className="primary" onClick={handleValidateKyc}>Validate KYC</button>
           </div>
           <div className="score-box" style={{ marginTop: 18 }}>
             <div>
-              <span className="label">KYC Status</span>
-              <strong>{kycStatus}</strong>
+              <span className="label">KYC Details</span>
+              <strong>{kycStatus === 'VALID' ? 'PAN Format Valid' : kycStatus === 'INVALID' ? 'Invalid PAN Format' : 'Not Validated'}</strong>
             </div>
-            <div className={`badge ${kycStatus === 'Verified' ? 'success' : kycStatus === 'Failed' || kycStatus === 'Manual Review' ? 'warning' : 'info'}`}>
-              {kycStatus}
+            <div className={`badge ${kycStatus === 'VALID' ? 'success' : kycStatus === 'INVALID' ? 'warning' : 'info'}`}>
+              Status: {kycStatus}
             </div>
           </div>
           {kycMessage && <p style={{ margin: '12px 0 0', color: '#324a6e' }}>{kycMessage}</p>}

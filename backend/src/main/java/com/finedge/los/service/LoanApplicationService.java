@@ -4,10 +4,12 @@ import com.finedge.los.dto.ApplicationResponse;
 import com.finedge.los.dto.ApplicationDetailResponse;
 import com.finedge.los.dto.CreateApplicationRequest;
 import com.finedge.los.dto.LoanDetailsRequest;
+import com.finedge.los.dto.SubmitApplicationRequest;
 import com.finedge.los.entity.*;
 import com.finedge.los.entity.LoanApplication.ApplicationStatus;
 import com.finedge.los.exception.ResourceNotFoundException;
 import com.finedge.los.repository.ApplicantRepository;
+import com.finedge.los.repository.KycVerificationRepository;
 import com.finedge.los.repository.LoanApplicationRepository;
 import org.springframework.beans.factory.annotation.Value;
 import org.slf4j.Logger;
@@ -32,8 +34,9 @@ public class LoanApplicationService {
     private static final Logger logger = LoggerFactory.getLogger(LoanApplicationService.class);
     private final LoanApplicationRepository repository;
     private final ApplicantRepository applicantRepository;
-    private final MockPanVerificationService panVerificationService;
-    private final MockCreditBureauService mockCreditBureauService;
+    private final KycVerificationRepository kycVerificationRepository;
+    private final KycProvider kycProvider;
+    private final PanFormatValidationService panFormatValidationService;
     private final LosNumberGenerator losNumberGenerator;
 
     @Value("${app.loan.max-interest-rate:30}")
@@ -42,13 +45,15 @@ public class LoanApplicationService {
     public LoanApplicationService(
             LoanApplicationRepository repository,
             ApplicantRepository applicantRepository,
-            MockPanVerificationService panVerificationService,
-            MockCreditBureauService mockCreditBureauService,
+            KycVerificationRepository kycVerificationRepository,
+            KycProvider kycProvider,
+            PanFormatValidationService panFormatValidationService,
             LosNumberGenerator losNumberGenerator) {
         this.repository = repository;
         this.applicantRepository = applicantRepository;
-        this.panVerificationService = panVerificationService;
-        this.mockCreditBureauService = mockCreditBureauService;
+        this.kycVerificationRepository = kycVerificationRepository;
+        this.kycProvider = kycProvider;
+        this.panFormatValidationService = panFormatValidationService;
         this.losNumberGenerator = losNumberGenerator;
     }
 
@@ -121,13 +126,13 @@ public class LoanApplicationService {
     }
 
     @Transactional
-    public ApplicationDetailResponse runCreditCheckDetails(Long applicationId) {
-        return ApplicationDetailResponse.fromEntity(runCreditCheck(applicationId));
+    public ApplicationDetailResponse runCreditCheckDetails(Long applicationId, String creditScore) {
+        return ApplicationDetailResponse.fromEntity(runCreditCheck(applicationId, creditScore));
     }
 
     @Transactional
-    public ApplicationDetailResponse submitApplicationDetails(Long applicationId) {
-        return ApplicationDetailResponse.fromEntity(submitApplication(applicationId));
+    public ApplicationDetailResponse submitApplicationDetails(Long applicationId, SubmitApplicationRequest request) {
+        return ApplicationDetailResponse.fromEntity(submitApplication(applicationId, request));
     }
 
     @Transactional
@@ -157,6 +162,15 @@ public class LoanApplicationService {
         validateApplicationRequest(request);
         LoanApplication application = getById(applicationId);
         ensureCurrentUserOwnsApplicant(request.getApplicant());
+        String priorPan = application.getApplicant().getPanNumber();
+        String updatedPan = request.getApplicant().getPanNumber().toUpperCase();
+        if (!priorPan.equals(updatedPan)) {
+            kycVerificationRepository.findByLoanApplicationId(applicationId).ifPresent(verification -> {
+                verification.setStatus(KycVerification.KycStatus.FAILED);
+                verification.setFailureReason("Applicant PAN changed; rerun PAN format validation");
+                kycVerificationRepository.save(verification);
+            });
+        }
         updateApplicant(application.getApplicant(), request);
         updateEmployment(application, request);
         updateLoanDetails(application, request);
@@ -233,8 +247,8 @@ public class LoanApplicationService {
             throw new IllegalArgumentException("Please enter a valid 10-digit mobile number.");
         }
 
-        var panResult = panVerificationService.verify(request.getApplicant());
-        if (!panResult.isVerified()) {
+        var panResult = panFormatValidationService.validate(request.getApplicant());
+        if (!panResult.isValid()) {
             throw new IllegalArgumentException(panResult.getMessage());
         }
 
@@ -339,30 +353,75 @@ public class LoanApplicationService {
     }
 
     @Transactional
-    public LoanApplication runCreditCheck(Long applicationId) {
+    public LoanApplication runCreditCheck(Long applicationId, String scoreInput) {
         LoanApplication application = getById(applicationId);
-        String pan = application.getApplicant().getPanNumber();
-        MockCreditBureauService.CreditScoreResponse response = mockCreditBureauService.evaluate(pan);
+        if (scoreInput == null || !scoreInput.matches("[0-9]+")) {
+            throw new IllegalArgumentException("Credit score must be a whole number between 300 and 900");
+        }
+        int creditScore;
+        try {
+            creditScore = Integer.parseInt(scoreInput);
+        } catch (NumberFormatException exception) {
+            throw new IllegalArgumentException("Credit score must be between 300 and 900");
+        }
+        if (creditScore < 300 || creditScore > 900) {
+            throw new IllegalArgumentException("Credit score must be between 300 and 900");
+        }
 
-        CreditCheck creditCheck = new CreditCheck();
-        creditCheck.setCreditScore(response.getCreditScore());
-        creditCheck.setBureau(response.getBureau());
-        creditCheck.setStatus(response.getStatus());
-        creditCheck.setRemarks("Demo credit check succeeded");
+        CreditCheck creditCheck = application.getCreditCheck() == null ? new CreditCheck() : application.getCreditCheck();
+        creditCheck.setCreditScore(creditScore);
+        creditCheck.setBureau("MANUAL");
+        creditCheck.setStatus(creditScore <= 649 ? "POOR" : creditScore <= 749 ? "FAIR" : "GOOD");
+        creditCheck.setRemarks("Manually entered credit score");
         application.setCreditCheck(creditCheck);
         application.setStatus(LoanApplication.ApplicationStatus.CREDIT_CHECK_COMPLETED);
         return repository.save(application);
     }
 
     @Transactional
-    public LoanApplication submitApplication(Long applicationId) {
+    public LoanApplication submitApplication(Long applicationId, SubmitApplicationRequest request) {
+        if (request == null) {
+            throw new IllegalArgumentException("Submission details are required");
+        }
         LoanApplication application = getById(applicationId);
         if (!hasAllRequiredDocuments(application)) {
             throw new IllegalArgumentException("Please upload all required documents before submitting the application.");
         }
-        if (application.getCreditCheck() == null) {
-            throw new IllegalArgumentException("Credit check must be completed before submission");
+        Applicant applicant = application.getApplicant();
+        if (applicant == null || applicant.getFullName() == null || applicant.getFullName().isBlank()) {
+            throw new IllegalArgumentException("Customer name is required.");
         }
+        if (request.getCustomerName() == null || !request.getCustomerName().trim().equals(applicant.getFullName().trim())) {
+            throw new IllegalArgumentException("Customer name must match the application details.");
+        }
+        if (!"PAN_VERIFICATION".equalsIgnoreCase(request.getVerificationType() == null ? "" : request.getVerificationType().trim())) {
+            throw new IllegalArgumentException("Only PAN Verification is currently supported.");
+        }
+        if (request.getPanNumber() == null || request.getPanNumber().isEmpty()) {
+            throw new IllegalArgumentException("PAN number is required.");
+        }
+        if (!request.getPanNumber().matches("[A-Za-z]{5}[0-9]{4}[A-Za-z]")) {
+            throw new IllegalArgumentException("Enter a valid PAN in the format ABCDE1234F.");
+        }
+        String normalizedPan = request.getPanNumber().toUpperCase(java.util.Locale.ROOT);
+        if (applicant.getPanNumber() == null || !normalizedPan.equals(applicant.getPanNumber())) {
+            throw new IllegalArgumentException("PAN must match the application details.");
+        }
+        if (!kycProvider.isPanFormatValid(normalizedPan)) {
+            throw new IllegalArgumentException("Enter a valid PAN in the format ABCDE1234F.");
+        }
+
+        runCreditCheck(applicationId, request.getCreditScore());
+        KycVerification verification = kycVerificationRepository.findByLoanApplicationId(applicationId)
+                .orElseGet(KycVerification::new);
+        verification.setLoanApplication(application);
+        verification.setCustomerId(applicant.getId());
+        verification.setVerificationType(KycVerification.VerificationType.PAN_VERIFICATION);
+        verification.setProvider("LOCAL_PAN_FORMAT_VALIDATION");
+        verification.setStatus(KycVerification.KycStatus.VALIDATION_PASSED);
+        verification.setFailureReason(null);
+        verification.setRetryCount(0);
+        kycVerificationRepository.save(verification);
         if (application.getLosNumber() == null || application.getLosNumber().isBlank()) {
             application.setLosNumber(losNumberGenerator.generate());
         }

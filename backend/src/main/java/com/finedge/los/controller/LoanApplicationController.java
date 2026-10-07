@@ -3,6 +3,8 @@ package com.finedge.los.controller;
 import com.finedge.los.dto.ApplicationResponse;
 import com.finedge.los.dto.ApplicationDetailResponse;
 import com.finedge.los.dto.CreateApplicationRequest;
+import com.finedge.los.dto.CreditScoreRequest;
+import com.finedge.los.dto.SubmitApplicationRequest;
 import com.finedge.los.entity.Document;
 import com.finedge.los.entity.LoanApplication;
 import com.finedge.los.exception.DocumentStorageException;
@@ -79,8 +81,10 @@ public class LoanApplicationController {
     }
 
     @PostMapping("/applications/{id}/credit-check")
-    public ResponseEntity<ApplicationDetailResponse> runCreditCheck(@PathVariable Long id) {
-        return ResponseEntity.ok(service.runCreditCheckDetails(id));
+    public ResponseEntity<ApplicationDetailResponse> runCreditCheck(
+            @PathVariable Long id,
+            @Valid @RequestBody(required = false) CreditScoreRequest request) {
+        return ResponseEntity.ok(service.runCreditCheckDetails(id, request == null ? null : request.getCreditScore()));
     }
 
     @PostMapping("/applications/{id}/documents")
@@ -239,7 +243,9 @@ public class LoanApplicationController {
     }
 
     @PostMapping("/applications/{id}/submit")
-    public ResponseEntity<ApplicationDetailResponse> submitApplication(@PathVariable Long id) {
-        return ResponseEntity.ok(service.submitApplicationDetails(id));
+    public ResponseEntity<ApplicationDetailResponse> submitApplication(
+            @PathVariable Long id,
+            @Valid @RequestBody SubmitApplicationRequest request) {
+        return ResponseEntity.ok(service.submitApplicationDetails(id, request));
     }
 }

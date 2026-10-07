@@ -268,6 +268,9 @@ input, select {
 .secondary { background: #edf3ff; color: #153b7a; }
 .score-box { display: flex; justify-content: space-between; align-items: center; padding: 18px 20px; border: 1px solid #dfeafc; border-radius: 12px; background: #f6f9ff; margin-bottom: 18px; }
 .score-box strong { font-size: 2.6rem; }
+.score-box .score-status { font-size: 1.1rem; }
+.field-error { color: #a61d1d; font-size: 0.8rem; font-weight: 500; }
+input[aria-invalid="true"], select[aria-invalid="true"] { border-color: #c43b3b; }
 .label { display: block; color: #536a90; font-size: 0.9rem; }
 .badge { display: inline-flex; padding: 7px 10px; border-radius: 999px; font-weight: 700; font-size: 0.72rem; }
 .badge.success { background: #eafbf0; color: #1e8e5d; }

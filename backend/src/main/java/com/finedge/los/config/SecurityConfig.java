@@ -35,7 +35,7 @@ public class SecurityConfig {
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers("/api/auth/**", "/error/**").permitAll()
                 .requestMatchers("/api/admin/**").hasRole("ADMIN")
-                .requestMatchers("/api/applications/**", "/api/documents/**", "/api/mock/**").authenticated()
+                .requestMatchers("/api/applications/**", "/api/documents/**").authenticated()
                 .anyRequest().denyAll()
             )
             .exceptionHandling(exceptions -> exceptions

@@ -27,7 +27,7 @@ public class KycVerification {
     private KycStatus status = KycStatus.INITIATED;
 
     @Column(nullable = false, length = 64)
-    private String provider = "SIGNZY";
+    private String provider = "LOCAL_PAN_FORMAT_VALIDATION";
 
     @Column(length = 128)
     private String requestReferenceId;
@@ -67,6 +67,7 @@ public class KycVerification {
     public enum KycStatus {
         INITIATED,
         PENDING,
+        VALIDATION_PASSED,
         VERIFIED,
         FAILED,
         MANUAL_REVIEW
