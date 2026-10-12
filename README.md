@@ -1,222 +1,119 @@
-# LoanOriginationSystem
+# Bluewaves Distributors Private Limited | BDPL Corporate Website
 
-**FinEdge Bank - Loan Origination System**
+This project contains a responsive, enterprise-style corporate website for Bluewaves Distributors Private Limited (BDPL). It was built as a static React + Vite frontend and is aligned to the supplied business-content guidance for a public B2B website.
 
-## 1. Overview
+## Overview
 
-FinEdge LOS is a development/demo application for capturing loan applicant, employment, and loan information; manually entering and validating a credit score; checking PAN input format; uploading supporting documents; and storing applications in a local database. It is not connected to a real bank, credit bureau, or KYC provider and must not be used for lending or compliance decisions.
+The site presents BDPL as a technology-enabled retail commerce and distribution business focused on:
 
-The frontend is a single-page application. Its progress indicator labels five stages, but the form sections are displayed together rather than as separate wizard pages.
+- telecom distribution and recharge services
+- retailer and distributor enablement
+- digital financial services distribution
+- bill payments and consumer connectivity
+- merchant services
+- advertising and brand-related services
 
-# Security
+The implementation intentionally excludes future growth plans, future strategic proposals, investment asks, roadmap language, and Moneytray-related metrics or references.
 
-This project implements practical security hardening with the existing Spring Boot, Spring Security, JPA, PostgreSQL, and React stack. No new Maven or npm dependencies were added. No application can be guaranteed to be completely vulnerability-free.
+## Technology Stack
 
-## Authentication Security
+- Frontend: React 18 + TypeScript + Vite
+- Styling: custom responsive CSS, no heavy UI framework
+- Deployment target: Netlify static site
+- Contact form: Netlify Forms with a standard HTML form
 
-- User login validates a 10-digit mobile number and the fixed demo OTP.
-- Admin login validates the fixed demo `admin` / `admin` credentials.
-- Successful login issues a short-lived, server-generated bearer token held in browser `sessionStorage`.
-- Logout revokes the token and clears the browser session.
-- The token store is in memory and is lost on backend restart; this is suitable only for this demo.
-
-## Authorization
-
-- `USER` and `ADMIN` roles are assigned by the backend after credential validation.
-- Protected APIs require a valid bearer token; caller-supplied role, mobile, and username headers are not trusted.
-- Admin listing, counts, and search are restricted to `ADMIN`.
-- Application and document operations perform application ownership checks for users; admins may manage applications.
-
-## Data Protection
-
-- PostgreSQL connection values are supplied through environment variables.
-- Document storage is configured through `DOCUMENT_STORAGE_PATH` and is outside the frontend public directory by default.
-- API error responses do not return stack traces, filesystem paths, SQL, or secrets.
-
-## Document Security
-
-- Uploads are limited to 10 MB per file and 20 MB per request.
-- PDF, JPG/JPEG, and PNG MIME types must agree with the filename extension.
-- Storage uses opaque generated filenames; path traversal and arbitrary storage keys are rejected.
-- Download, list, replace, and delete operations require authorization through the owning application.
-
-## API Security
-
-- Backend Bean Validation and service validation cover mobile, PAN, email, text lengths, salary, loan amount, interest rate, and tenure.
-- Admin search uses parameterized Spring Data JPA queries and has a length limit.
-- CORS allows only local frontend origins on port 5173; wildcard origins are not enabled.
-- CSRF is disabled because the API is stateless bearer-token authentication rather than cookie authentication. Production HTTPS and a reviewed token/session design remain necessary.
-- Spring Security adds content-type, frame, and referrer protections. HSTS is disabled for local HTTP development.
-
-## Logging Security
-
-Routine logging does not include passwords, OTPs, bearer tokens, document contents, original document names, or storage keys. Error diagnostics remain server-side and should be reviewed before production logging is enabled.
-
-## Secrets Management
-
-Use environment variables such as `DB_USERNAME`, `DB_PASSWORD`, and `DOCUMENT_STORAGE_PATH`. `.env` files, generated files, uploads, `target`, and `node_modules` are ignored by Git. Do not commit real passwords, API keys, private keys, uploaded documents, or local databases.
-
-## Security Controls Checklist
-
-- [x] Backend authentication with server-issued tokens
-- [x] Role-based authorization and application ownership checks
-- [x] Document authorization and secure file path handling
-- [x] Backend input and upload validation
-- [x] Parameterized database search
-- [x] Safe error responses and reduced sensitive logging
-- [x] Environment-based database configuration
-- [x] Restricted CORS and documented stateless CSRF strategy
-- [x] Security headers appropriate for local HTTP development
-- [ ] Production-grade OTP provider and password management
-- [ ] Distributed rate limiting and account lockout
-- [ ] Malware/content scanning for uploads
-- [ ] Encryption at rest and production HTTPS infrastructure
-
-## Security Limitations
-
-The OTP and admin credentials are demo values and are intentionally retained for compatibility. Tokens are in-memory and not suitable for a multi-instance deployment. Robust distributed rate limiting, malware scanning, encryption at rest, production identity management, and HTTPS infrastructure require operational controls or additional components and were not added under the no-new-dependencies requirement.
-
-## 2. Current Features
-
-- A browser login screen with User and Admin choices. Login is currently simulated in the frontend; see [Authentication and limitations](#8-authentication-and-limitations).
-- Applicant, employment/income, and loan detail forms.
-- A live frontend EMI estimate based on amount, annual interest rate, and tenure.
-- Manual credit-score entry with backend range validation and automatically calculated status.
-- Local PAN format validation for KYC input; no external KYC provider is connected.
-- UI support to upload, replace, list, and view required documents; the backend also exposes a document-delete API.
-- Draft creation and updates persisted by the backend.
-- Backend submission logic that requires all four document types, a valid persisted credit score, and successful local PAN format validation, then assigns an LOS number.
-- An Admin-only Recent Applications table with applicant-name/LOS-number/mobile text filtering, status filtering, and an Open action.
-- PostgreSQL persistence and filesystem document storage by default; H2 is used for backend tests.
-
-### Current limitations
-
-- Credit Score is manually entered and validated against the configured 300-900 range.
-- KYC currently performs local input/format validation. No external KYC provider is connected yet.
-- User login does not provide a saved-application picker. Persisted applications can be opened from the Admin-only Recent Applications table.
-- The application-summary download button has no download action. There are no UI actions to approve or reject an application.
-
-## 3. Technology Stack
-
-| Area | Technology |
-| --- | --- |
-| Backend | Java 17, Spring Boot 3.3.3, Spring Web, Spring Security, Spring Data JPA, Bean Validation |
-| Backend build | Maven; no Maven Wrapper is included |
-| Database | PostgreSQL for runtime; H2 in-memory database for tests |
-| Frontend | React 18, TypeScript 5, Vite 5 |
-| Document bytes | Local filesystem |
-| Automated tests | Spring Boot Test / JUnit via Maven; TypeScript build via npm |
-
-Dependency versions and ranges are declared in [backend/pom.xml](backend/pom.xml) and [frontend/package.json](frontend/package.json). The project does not pin a Node.js or Maven version in its build configuration. Vite 5 requires Node.js 18 or newer; Java 17 is configured for the backend.
-
-## 4. Project Structure
+## Project Structure
 
 ```text
-backend/
-  src/main/java/com/finedge/los/
-    config/       Spring Security and KYC provider selection
-    controller/   REST API controllers
-    dto/          API request and response objects
-    entity/       JPA-persisted application data
-    exception/    API exception handling
-    repository/   Spring Data repositories
-    security/     Server-issued demo token authentication
-    service/      Application, document, manual credit, PAN format, and KYC validation logic
-  src/main/resources/  Runtime and test configuration
-  data/documents/      Uploaded document files at runtime
 frontend/
-  src/App.tsx           LOS form, Admin table, and page-level login gate
-  src/LoginPage.tsx     Demo login screen
-  src/auth.ts           Browser session storage and request headers
-  vite.config.ts        Frontend port and backend API proxy
-USER_MANUAL.md          Non-technical end-user guide
+  src/App.tsx         Corporate website and Netlify-ready contact form
+  src/styles.css      Full responsive styling for the site
+  index.html          Page metadata and SEO tags
+  public/
+    404.html          Custom fallback page for direct URL loads
+    privacy-policy.html  Privacy policy draft
+    favicon.svg        BDPL wordmark favicon
+    robots.txt         Search engine crawler guidance
+    sitemap.xml       Placeholder sitemap for production domain
 ```
 
-## 5. Prerequisites
-
-- Java 17
-- Maven installed and available as `mvn` in the terminal
-- Node.js 18 or newer and npm
-- Git, if cloning the repository
-
-Check the tools with `java -version`, `mvn -version`, `node --version`, and `npm --version`.
-
-## 6. Install and Build
-
-From the repository root, install frontend dependencies and build the frontend:
+## Local Development
 
 ```bash
 cd frontend
-npm ci
-npm run build
-```
-
-Build and test the backend:
-
-```bash
-cd backend
-mvn test
-mvn package
-```
-
-## 7. Run the Application
-
-Run each process in a separate terminal. Start Maven from `backend` so the relative document path resolves beneath `backend/data/`. Configure the PostgreSQL environment variables before starting the backend; the default database is `loan_origination` on `localhost:5432`.
-
-Backend:
-
-```bash
-cd backend
-mvn spring-boot:run
-```
-
-On PowerShell, configure the PostgreSQL password in the process environment before starting. Do not put the real password in `application.yml` or commit it to the repository:
-
-```powershell 
-$env:DB_HOST = "localhost"
-$env:DB_PORT = "5432"
-$env:DB_NAME = "loan_origination"
-$env:DB_USERNAME = "postgres"
-$env:DB_PASSWORD = "LOS123"
-mvn spring-boot:run
-```
-
-If `DB_PASSWORD` is missing, startup stops with a configuration error instead of attempting an empty-password database connection. If Maven cannot resolve the `spring-boot` prefix, run the command from `backend/` or use `mvn org.springframework.boot:spring-boot-maven-plugin:3.3.3:run`.
-
-The backend listens on `http://localhost:8080`.
-
-Frontend:
-
-```bash
-cd frontend
-npm ci
+npm install
 npm run dev -- --host 0.0.0.0
 ```
 
-Vite uses port `5173` by default and proxies `/api` requests to `http://localhost:8080`. If that port is busy, Vite automatically tries another port; use the URL printed in the terminal. Open `http://localhost:5173` when the default port is available.
+The site will be available on the Vite local URL, typically http://localhost:5173.
 
-## 8. Authentication and Limitations
+## Production Build
 
-The visible login screen calls the backend demo login endpoints and stores the returned server-issued bearer token in browser `sessionStorage`.
+```bash
+cd frontend
+npm run build
+```
 
-**User demo login:** enter exactly 10 digits and use OTP `123456`. Non-digit input and invalid pasted values are rejected. The OTP is hardcoded for the demo; no SMS is sent.
+## Deployment
 
-**Admin demo login:** username `admin`, password `admin`. These values are hardcoded in the frontend and backend demo service.
+This project is configured for Netlify static deployment.
 
-The backend login endpoints return role/user information and a short-lived token. Application API requests use `Authorization: Bearer ...`; caller-supplied identity headers are ignored. Role selection in the UI remains a demo convenience, not a production identity system.
+```toml
+[build]
+  base = "frontend"
+  command = "npm run build"
+  publish = "dist"
+```
 
-Logout revokes the in-memory bearer token where the backend is available, clears the browser session value, and returns the UI to the login screen.
-## 9. User Application Workflow
+When deploying to Netlify, configure the repository to use the frontend directory as the app root and the dist folder as the publish directory.
 
-The form contains these sections on one page:
+## Contact Form Setup
 
-1. **Applicant Details:** name, date of birth, PAN, mobile, personal/work email, address, city, state, and pincode.
-2. **Employment & Income:** employment type, employer, designation, experience, and monthly in-hand/gross income.
-3. **Credit Score:** enter a whole number from 300 through 900. The status updates immediately: 300-649 is `POOR`, 650-749 is `FAIR`, and 750-900 is `GOOD`.
-4. **KYC Verification:** confirm the customer name and PAN Verification type, enter a PAN, and select **Validate KYC**. This performs local format validation only and does not call an API or verify government records.
-5. **Loan Details:** loan type, requested amount, tenure in months, annual interest rate, and loan purpose. The frontend recalculates an EMI estimate as these values change.
-6. **Document Upload:** upload Bank Statement, Latest Salary Slip, Previous Salary Slip, and PAN Document.
-7. **Save Draft** or **Submit Application**.
+The contact form is implemented as a Netlify Forms submission and is intentionally not a placeholder.
+
+### Required Netlify configuration
+
+1. Push the repository to GitHub.
+2. Import the repository to Netlify.
+3. Use the existing build configuration in netlify.toml.
+4. After deployment, open the Netlify dashboard and confirm the form is detected as `bdpl-contact`.
+5. Enable form notifications or email delivery in the Netlify dashboard, if required.
+
+### Important note
+
+No email, SMTP, or secret credentials are stored in the frontend code. Notifications are created inside the Netlify dashboard after deployment. This project does not claim live email delivery until that configuration is completed and verified.
+
+## Environment Variables
+
+No frontend environment variables are required for the static site.
+
+If the site is later moved to a custom backend or different form provider, add the configuration through that platform and keep secrets out of the frontend source code.
+
+## Privacy Policy
+
+A draft privacy policy page is included at `/privacy-policy.html` and linked from the footer. It explains the information collected through the inquiry form, the business purpose of collection, retention handling, and the need for BDPL to confirm final retention and sharing practices before production.
+
+## Business details BDPL should confirm before production
+
+Before launch, the business should confirm:
+
+- final public contact details and inquiry-routing destination
+- whether Netlify form notifications should be enabled
+- the official website domain and final canonical URL
+- any retention period for submitted inquiries
+- any sharing or internal escalation workflow for inbound business enquiries
+- whether a dedicated privacy policy review is required by legal/compliance teams
+
+## Quality checks performed
+
+- build verification with `npm run build`
+- review of page metadata and accessibility basics
+- confirmation that the project does not include Moneytray references, future strategy claims, or fabricated financial metrics
+- mobile-first responsive layout implemented for common viewport widths
+
+## Final notes
+
+The site is designed to be credible, mobile-friendly, and straightforward to deploy without introducing a custom backend. The enquiry form remains intentionally simple and production-ready for a Netlify static deployment model.
 
 The progress marker is presentational; it does not navigate between sections. The form starts with sample values, so replace them with the intended applicant's information.
 

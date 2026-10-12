@@ -1,9 +1,114 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import { clearAuth, DEMO_ADMIN, DEMO_USER_OTP, persistAuth, readStoredAuth, type AuthSession } from './auth';
+import { CONSENT_DOCUMENTS, CONSENT_VERSION } from './termsContent';
 
 const initialMode = 'user';
+const CONSENT_ERROR = 'Please accept the Terms & Conditions and Privacy Policy to continue.';
 
 type LoginMode = 'user' | 'admin';
+type ConsentDocumentKey = keyof typeof CONSENT_DOCUMENTS;
+
+type ConsentControlProps = {
+  id: string;
+  accepted: boolean;
+  error: string;
+  onChange: (accepted: boolean) => void;
+  onOpenDocument: (document: ConsentDocumentKey) => void;
+};
+
+function ConsentControl({ id, accepted, error, onChange, onOpenDocument }: ConsentControlProps) {
+  const openDocument = (event: MouseEvent<HTMLAnchorElement>, document: ConsentDocumentKey) => {
+    event.preventDefault();
+    onOpenDocument(document);
+  };
+
+  return (
+    <div className={`consent-section ${error ? 'has-error' : ''}`}>
+      <div className="consent-row">
+        <input
+          id={id}
+          type="checkbox"
+          checked={accepted}
+          onChange={(event) => onChange(event.target.checked)}
+          aria-label="I have read and agree to the Terms & Conditions and Privacy Policy."
+          aria-invalid={Boolean(error)}
+          aria-describedby={error ? `${id}-error` : undefined}
+        />
+        <p>
+          <label htmlFor={id}>I have read and agree to the</label>{' '}
+          <a href="#terms-and-conditions" onClick={(event) => openDocument(event, 'terms')}>
+            Terms &amp; Conditions
+          </a>{' '}and{' '}
+          <a href="#privacy-policy" onClick={(event) => openDocument(event, 'privacy')}>
+            Privacy Policy
+          </a>.
+        </p>
+      </div>
+      {error && <div id={`${id}-error`} className="consent-error" role="alert">{error}</div>}
+    </div>
+  );
+}
+
+function PolicyDialog({ documentKey, onClose }: { documentKey: ConsentDocumentKey; onClose: () => void }) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const document = CONSENT_DOCUMENTS[documentKey];
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) {
+      return;
+    }
+    dialog.showModal();
+    return () => {
+      if (dialog.open) {
+        dialog.close();
+      }
+    };
+  }, []);
+
+  return (
+    <dialog
+      ref={dialogRef}
+      className="policy-dialog"
+      aria-labelledby="policy-dialog-title"
+      onCancel={(event) => {
+        event.preventDefault();
+        onClose();
+      }}
+      onClick={(event) => {
+        if (event.target === event.currentTarget) {
+          onClose();
+        }
+      }}
+    >
+      <div className="policy-dialog-inner">
+        <header className="policy-dialog-header">
+          <div>
+            <p className="policy-version">FinEdge Bank · Draft {CONSENT_VERSION}</p>
+            <h2 id="policy-dialog-title">{document.title}</h2>
+          </div>
+          <button type="button" className="policy-close" onClick={onClose} aria-label={`Close ${document.title}`}>
+            Close
+          </button>
+        </header>
+        <p className="policy-notice">
+          This demonstration wording is not legal advice or an approved bank policy. Legal and compliance review is required before production use.
+        </p>
+        <div className="policy-content">
+          {document.sections.map((section) => (
+            <section key={section.heading}>
+              <h3>{section.heading}</h3>
+              {section.paragraphs.map((paragraph) => <p key={paragraph}>{paragraph}</p>)}
+            </section>
+          ))}
+        </div>
+        <div className="policy-dialog-footer">
+          <button type="button" className="primary" onClick={onClose}>Close</button>
+        </div>
+      </div>
+    </dialog>
+  );
+}
 
 type UserLoginState = {
   mobile: string;
@@ -11,34 +116,66 @@ type UserLoginState = {
   otpSent: boolean;
   otpError: string;
   authError: string;
+  termsAccepted: boolean;
+  termsError: string;
 };
 
 type AdminLoginState = {
   username: string;
   password: string;
   authError: string;
+  termsAccepted: boolean;
+  termsError: string;
 };
 
 export function LoginPage({ onAuthenticated }: { onAuthenticated: (session: AuthSession) => void }) {
   const [mode, setMode] = useState<LoginMode>(initialMode);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showAdminPassword, setShowAdminPassword] = useState(false);
+  const [activePolicy, setActivePolicy] = useState<ConsentDocumentKey | null>(null);
   const [userState, setUserState] = useState<UserLoginState>({
     mobile: '9876543210',
     otp: '',
     otpSent: false,
     otpError: '',
-    authError: ''
+    authError: '',
+    termsAccepted: false,
+    termsError: ''
   });
   const [adminState, setAdminState] = useState<AdminLoginState>({
     username: 'admin',
     password: 'admin',
-    authError: ''
+    authError: '',
+    termsAccepted: false,
+    termsError: ''
   });
 
   const authSummary = useMemo(() => readStoredAuth(), []);
 
+  const updateUserConsent = (accepted: boolean) => {
+    setUserState((prev) => ({
+      ...prev,
+      termsAccepted: accepted,
+      termsError: accepted ? '' : prev.termsAccepted || prev.otpSent ? CONSENT_ERROR : prev.termsError
+    }));
+  };
+
+  const updateAdminConsent = (accepted: boolean) => {
+    setAdminState((prev) => ({
+      ...prev,
+      termsAccepted: accepted,
+      termsError: accepted ? '' : prev.termsAccepted ? CONSENT_ERROR : prev.termsError
+    }));
+  };
+
   const onUserSendOtp = async () => {
+    if (isSubmitting) {
+      return;
+    }
+    if (!userState.termsAccepted) {
+      setUserState((prev) => ({ ...prev, termsError: CONSENT_ERROR }));
+      return;
+    }
     const mobile = userState.mobile;
     if (/\D/.test(mobile)) {
       setUserState((prev) => ({ ...prev, otpError: 'Mobile number must contain digits only.' }));
@@ -49,12 +186,17 @@ export function LoginPage({ onAuthenticated }: { onAuthenticated: (session: Auth
       return;
     }
 
-    setIsSubmitting(true);
-    setUserState((prev) => ({ ...prev, otpSent: true, otpError: '', authError: '' }));
-    window.setTimeout(() => setIsSubmitting(false), 300);
+    setUserState((prev) => ({ ...prev, otpSent: true, otpError: '', authError: '', termsError: '' }));
   };
 
   const onUserVerifyOtp = async () => {
+    if (isSubmitting) {
+      return;
+    }
+    if (!userState.termsAccepted) {
+      setUserState((prev) => ({ ...prev, termsError: CONSENT_ERROR }));
+      return;
+    }
     const mobile = userState.mobile;
 
     if (/\D/.test(mobile)) {
@@ -97,6 +239,13 @@ export function LoginPage({ onAuthenticated }: { onAuthenticated: (session: Auth
   };
 
   const onAdminLogin = async () => {
+    if (isSubmitting) {
+      return;
+    }
+    if (!adminState.termsAccepted) {
+      setAdminState((prev) => ({ ...prev, termsError: CONSENT_ERROR }));
+      return;
+    }
     const username = adminState.username.trim();
     if (!username) {
       setAdminState((prev) => ({ ...prev, authError: 'Username is required.' }));
@@ -209,6 +358,14 @@ export function LoginPage({ onAuthenticated }: { onAuthenticated: (session: Auth
               />
             </label>
 
+            <ConsentControl
+              id="user-terms-consent"
+              accepted={userState.termsAccepted}
+              error={userState.termsError}
+              onChange={updateUserConsent}
+              onOpenDocument={setActivePolicy}
+            />
+
             {!userState.otpSent ? (
               <button type="button" className="primary auth-submit" onClick={onUserSendOtp} disabled={isSubmitting}>
                 {isSubmitting ? 'Sending...' : 'Send OTP'}
@@ -237,8 +394,8 @@ export function LoginPage({ onAuthenticated }: { onAuthenticated: (session: Auth
               </>
             )}
 
-            {userState.otpError && <div className="auth-error">{userState.otpError}</div>}
-            {userState.authError && <div className="auth-error">{userState.authError}</div>}
+            {userState.otpError && <div className="auth-error" role="alert">{userState.otpError}</div>}
+            {userState.authError && <div className="auth-error" role="alert">{userState.authError}</div>}
           </div>
         )}
 
@@ -284,6 +441,14 @@ export function LoginPage({ onAuthenticated }: { onAuthenticated: (session: Auth
                   aria-label={showAdminPassword ? 'Hide password' : 'Show password'}
                 >
                   {showAdminPassword ? 'Hide' : 'Show'}
+
+              <ConsentControl
+                id="admin-terms-consent"
+                accepted={adminState.termsAccepted}
+                error={adminState.termsError}
+                onChange={updateAdminConsent}
+                onOpenDocument={setActivePolicy}
+              />
                 </button>
               </div>
             </label>
@@ -291,9 +456,11 @@ export function LoginPage({ onAuthenticated }: { onAuthenticated: (session: Auth
             <button type="button" className="primary auth-submit" onClick={onAdminLogin} disabled={isSubmitting}>
               {isSubmitting ? 'Signing in...' : 'Login'}
             </button>
-            {adminState.authError && <div className="auth-error">{adminState.authError}</div>}
+            {adminState.authError && <div className="auth-error" role="alert">{adminState.authError}</div>}
           </div>
         )}
+
+        {activePolicy && <PolicyDialog documentKey={activePolicy} onClose={() => setActivePolicy(null)} />}
 
         {authSummary && (
           <button

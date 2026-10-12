@@ -5,7 +5,7 @@
 
 [build.environment]
   NODE_VERSION = "20"
-  VITE_MOCK_API = "true"
+  VITE_MOCK_API = "false"
 
 [[redirects]]
   from = "/*"

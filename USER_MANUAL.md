@@ -41,17 +41,23 @@ Choose **User** on the login screen.
 
 Enter exactly 10 digits. Do not enter spaces, punctuation, letters, or the country code `+91`; the application rejects non-digit input.
 
-### Step 4 - Send OTP
+### Step 4 - Review and Accept the Terms
+
+Review the **Terms & Conditions** and **Privacy Policy** using their links, then select the required acceptance checkbox before choosing **Send OTP**. If you clear the checkbox after the OTP step appears, you must accept again before verifying the OTP. Admin login has its own separate acceptance checkbox.
+
+The displayed policy is draft demonstration wording, not legal advice or an approved bank policy. The current login flow validates consent in the frontend only; it does not persist an acceptance timestamp, policy version, or user identifier for audit. Legal/compliance review and backend consent-audit persistence are required before relying on this as production consent.
+
+### Step 5 - Send OTP
 
 Select **Send OTP**. This demo does not send a text message; it displays the test OTP on the screen.
 
-### Step 5 - Enter OTP
+### Step 6 - Enter OTP
 
 Enter `123456` and select **Verify OTP**.
 
 > **DEMO / TEST ONLY:** `123456` is a fixed test code, not a real one-time password.
 
-### Step 6 - Enter the Application
+### Step 7 - Enter the Application
 
 After login, the application form appears. Its sections are on one page. The numbered progress marker is an indicator, not a set of separate pages. Some fields contain sample values; replace those values with the information for the application you are preparing.
 
@@ -131,9 +137,10 @@ The current format is `LOS-YYYY-########`, where `YYYY` is the year and the fina
 ## Admin Login
 
 1. Select **Admin** on the login screen.
-2. Enter the admin username.
-3. Enter the admin password.
-4. Select **Login**.
+2. Review the **Terms & Conditions** and **Privacy Policy**, then select the required acceptance checkbox.
+3. Enter the admin username.
+4. Enter the admin password.
+5. Select **Login**.
 
 > **DEMO / DEVELOPMENT ONLY:** The current demo credentials are username `admin` and password `admin`. Do not use these credentials for a real service.
 

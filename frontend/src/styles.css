@@ -158,6 +158,168 @@ button, input, select { font: inherit; }
   box-shadow: 0 0 0 4px rgba(110, 146, 255, 0.12);
 }
 
+.consent-section {
+  padding: 12px 14px;
+  border: 1px solid #d8e1f2;
+  border-radius: 12px;
+  background: #f8fbff;
+}
+
+.consent-section.has-error {
+  border-color: #d94b61;
+  background: #fff7f8;
+}
+
+.consent-row {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+}
+
+.consent-row input {
+  width: 18px;
+  height: 18px;
+  margin: 2px 0 0;
+  accent-color: #3154ac;
+  cursor: pointer;
+}
+
+.consent-row p {
+  margin: 0;
+  color: #1d3557;
+  font-size: 0.84rem;
+  line-height: 1.6;
+}
+
+.consent-row a {
+  display: inline-block;
+  padding: 3px 1px;
+  margin: -3px -1px;
+  color: #3154ac;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.consent-row a:focus-visible,
+.consent-row input:focus-visible,
+.policy-dialog button:focus-visible {
+  outline: 3px solid rgba(49, 84, 172, 0.35);
+  outline-offset: 2px;
+}
+
+.consent-error {
+  margin: 8px 0 0 30px;
+  color: #ad1f3d;
+  font-size: 0.82rem;
+  font-weight: 600;
+  line-height: 1.45;
+}
+
+.policy-dialog {
+  width: min(680px, calc(100vw - 32px));
+  max-width: none;
+  max-height: min(82vh, 760px);
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid #d8e1f2;
+  border-radius: 18px;
+  color: #112544;
+  background: #fff;
+  box-shadow: 0 28px 90px rgba(10, 27, 60, 0.28);
+}
+
+.policy-dialog::backdrop {
+  background: rgba(5, 15, 36, 0.58);
+  backdrop-filter: blur(3px);
+}
+
+.policy-dialog-inner {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  gap: 14px;
+  max-height: inherit;
+  padding: 24px;
+}
+
+.policy-dialog-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.policy-dialog-header h2 {
+  margin: 3px 0 0;
+  font-size: 1.45rem;
+}
+
+.policy-version {
+  margin: 0;
+  color: #536a90;
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.policy-close {
+  flex: 0 0 auto;
+  min-height: 40px;
+  padding: 8px 12px;
+  border: 1px solid #d8e1f2;
+  border-radius: 8px;
+  color: #18335e;
+  background: #f8fbff;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.policy-notice {
+  margin: 0;
+  padding: 10px 12px;
+  border-left: 3px solid #d19a28;
+  color: #624b19;
+  background: #fff9e9;
+  font-size: 0.84rem;
+  line-height: 1.5;
+}
+
+.policy-content {
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 8px;
+  overscroll-behavior: contain;
+}
+
+.policy-content section + section {
+  margin-top: 18px;
+}
+
+.policy-content h3 {
+  margin: 0 0 6px;
+  color: #18335e;
+  font-size: 1rem;
+}
+
+.policy-content p {
+  margin: 0;
+  color: #425875;
+  font-size: 0.9rem;
+  line-height: 1.65;
+}
+
+.policy-dialog-footer {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 2px;
+}
+
+.policy-dialog-footer button {
+  min-height: 42px;
+  padding: 9px 18px;
+}
+
 .auth-demo-box {
   display: flex;
   align-items: center;
