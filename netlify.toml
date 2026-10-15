@@ -4,8 +4,8 @@
   publish = "dist"
 
 [build.environment]
-  NODE_VERSION = "20"
-  VITE_MOCK_API = "false"
+  NODE_VERSION = "22"
+  VITE_DEMO_MODE = "true"
 
 [[redirects]]
   from = "/*"
