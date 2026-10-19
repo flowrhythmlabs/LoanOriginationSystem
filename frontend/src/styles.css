@@ -588,3 +588,10 @@ label:has(> .required-asterisk) > .field-success {
 
 .bank-card { border: 1px solid #b9cdee; background: #f3f8ff; border-radius: 12px; padding: 14px; }
 .bank-card h3 { margin: 0 0 10px; color: #153768; }
+
+.coapplicant-card { border: 1px solid #c5d2e8; background: #fafcff; border-radius: 12px; padding: 14px; }
+.coapplicant-card h3 { margin: 0 0 10px; color: #153768; }
+
+.input-prefix-wrap { position: relative; display: block; }
+.input-prefix-wrap input { padding-left: 46px; }
+.input-prefix { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: #64748b; font-size: .9rem; pointer-events: none; }
