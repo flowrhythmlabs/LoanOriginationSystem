@@ -1,0 +1,32 @@
+server:
+  port: 8080
+  servlet:
+    context-path: /
+
+spring:
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:loan_origination}
+    driver-class-name: org.postgresql.Driver
+    username: ${DB_USERNAME:postgres}
+    password: ${DB_PASSWORD}
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+    properties:
+      hibernate:
+        format_sql: true
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 20MB
+
+app:
+  upload:
+    base-dir: ${DOCUMENT_STORAGE_PATH:./data/documents}
+  loan:
+    max-interest-rate: ${LOAN_MAX_INTEREST_RATE:30}
+logging:
+  level:
+    org.springframework.security: WARN
+    com.finedge: INFO
