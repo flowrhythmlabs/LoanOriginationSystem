@@ -138,6 +138,22 @@ const describeApiError = (payload: any, fallback: string) => {
 const validEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 const validPan = (value: string) => /^[A-Z]{5}[0-9]{4}[A-Z]$/.test(value);
 const validName = (value: string) => /^[A-Za-z .'-]+$/.test(value.trim());
+// Best-effort text parse of Aadhaar/PAN content; scanned images without a text layer yield nothing.
+const parseIdentityText = (text: string) => {
+  const t = text.replace(/\r/g, '\n');
+  const found: { fullName?: string; dateOfBirth?: string; panNumber?: string; gender?: string; fatherName?: string; aadhaarNumber?: string; residentialAddress?: string; pincode?: string; state?: string } = {};
+  const pan = t.match(/\b[A-Z]{5}[0-9]{4}[A-Z]\b/); if (pan) found.panNumber = pan[0];
+  const aadhaar = t.match(/\b[2-9]\d{3}\s?\d{4}\s?\d{4}\b/); if (aadhaar) found.aadhaarNumber = aadhaar[0].replace(/\s/g, '');
+  const dob = t.match(/(?:DOB|Date of Birth|Birth)\D{0,10}(\d{2})[\/-](\d{2})[\/-](\d{4})/i) || t.match(/\b(\d{2})[\/-](\d{2})[\/-](\d{4})\b/);
+  if (dob) found.dateOfBirth = `${dob[3]}-${dob[2]}-${dob[1]}`;
+  const gender = t.match(/\b(Female|Male|Transgender)\b/i); if (gender) found.gender = /trans/i.test(gender[1]) ? 'Other' : gender[1][0].toUpperCase() + gender[1].slice(1).toLowerCase();
+  const clean = (v: string) => v.replace(/[^A-Za-z .'-]/g, '').trim();
+  const name = t.match(/(?:^|\n)\s*Name\s*[:\-]?\s*\n?\s*([A-Za-z .'-]{3,60})/i); if (name && clean(name[1])) found.fullName = clean(name[1]);
+  const father = t.match(/Father'?s?\s*Name\s*[:\-]?\s*\n?\s*([A-Za-z .'-]{3,60})/i) || t.match(/(?:S\/O|D\/O|C\/O)\s*:?\s*([A-Za-z .'-]{3,60})/i); if (father && clean(father[1])) found.fatherName = clean(father[1]);
+  const addr = t.match(/Address\s*[:\-]?\s*([^\n][^]{5,200}?\b[1-9]\d{5})\b/i);
+  if (addr) { found.residentialAddress = addr[1].replace(/\s+/g, ' ').trim(); found.pincode = addr[1].match(/[1-9]\d{5}$/)?.[0]; found.state = INDIA_STATES.find(s => new RegExp(s, 'i').test(addr[1])); }
+  return found;
+};
 const calculateAge = (date: string) => { if (!date) return ''; const born = new Date(date); if (Number.isNaN(born.getTime())) return ''; const today = new Date(); let age = today.getFullYear() - born.getFullYear(); const monthDiff = today.getMonth() - born.getMonth(); if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < born.getDate())) age--; return age >= 0 ? String(age) : ''; };
 
 const validateMobileNumber = (mobile: string) => {
@@ -250,6 +266,9 @@ function App() {
   const autoResumeAttemptedRef = useRef<string | null>(null);
   const [mockKycMode, setMockKycMode] = useState('SUCCESS');
   const [validationMessage, setValidationMessage] = useState('');
+  const [identityConsent, setIdentityConsent] = useState(false);
+  const [identityFetch, setIdentityFetch] = useState<{ status: 'idle' | 'loading' | 'success' | 'error'; message: string; fields: string[]; aadhaar: string }>({ status: 'idle', message: '', fields: [], aadhaar: '' });
+  const [identityDragOver, setIdentityDragOver] = useState(false);
   const [saveIndicator, setSaveIndicator] = useState('');
   const [selectedFiles, setSelectedFiles] = useState<Record<DocumentType, string>>(() => Object.fromEntries(Object.keys(createInitialDocuments()).map((key) => [key, ''])) as Record<DocumentType, string>);
 
@@ -890,6 +909,36 @@ function App() {
     setCurrentStep(1); setHighestUnlockedStep(1); setValidationMessage('');
   };
 
+  const fetchIdentityDetails = async (file: File) => {
+    const fail = (message: string) => setIdentityFetch({ status: 'error', message, fields: [], aadhaar: '' });
+    if (!identityConsent) { fail('Please give consent before fetching details.'); return; }
+    if (!ALLOWED_FILE_TYPES.includes(file.type)) { fail('Unsupported file type. Upload a PDF, JPG or PNG up to 5 MB.'); return; }
+    if (file.size > MAX_FILE_SIZE) { fail('File exceeds 5 MB.'); return; }
+    setIdentityFetch({ status: 'loading', message: 'Reading document...', fields: [], aadhaar: '' });
+    try {
+      const text = new TextDecoder('latin1').decode(await file.arrayBuffer());
+      const data = parseIdentityText(text);
+      const fields: string[] = [];
+      setApplicant(prev => {
+        const extra = { ...(prev.additionalDetails || {}) };
+        const next = { ...prev };
+        if (data.fullName) { next.fullName = data.fullName; fields.push('Name'); }
+        if (data.dateOfBirth && !Number.isNaN(new Date(data.dateOfBirth).getTime())) { next.dateOfBirth = data.dateOfBirth; fields.push('Date of Birth'); }
+        if (data.panNumber) { next.panNumber = data.panNumber; fields.push('PAN'); }
+        if (data.residentialAddress) { next.residentialAddress = data.residentialAddress; fields.push('Address'); }
+        if (data.pincode) { next.pincode = data.pincode; fields.push('Pincode'); }
+        if (data.state) { next.state = data.state; fields.push('State'); }
+        if (data.gender) { extra.gender = data.gender; fields.push('Gender'); }
+        if (data.fatherName) { extra.fatherName = data.fatherName; fields.push("Father's Name"); }
+        if (data.aadhaarNumber) { extra.aadhaarNumber = data.aadhaarNumber; fields.push('Aadhaar Number'); }
+        return { ...next, additionalDetails: extra };
+      });
+      if (!fields.length) { fail('We could not read any details from this document. Please enter them manually.'); return; }
+      setIdentityFetch({ status: 'success', message: `${fields.length} fields filled - please review`, fields, aadhaar: data.aadhaarNumber ? `XXXX XXXX ${data.aadhaarNumber.slice(-4)}` : '' });
+    } catch {
+      fail('The document could not be processed. Please enter the details manually.');
+    }
+  };
   const setApplicantExtra = (key: string, value: string) => setApplicant(prev => ({ ...prev, additionalDetails: { ...(prev.additionalDetails || {}), [key]: value } }));
   const setEmploymentExtra = (key: string, value: string) => setEmployment(prev => ({ ...prev, additionalDetails: { ...(prev.additionalDetails || {}), [key]: value } }));
   const setLoanExtra = (key: string, value: string) => setLoanDetails(prev => ({ ...prev, additionalDetails: { ...(prev.additionalDetails || {}), [key]: value } }));
@@ -980,6 +1029,15 @@ function App() {
         <section className="card form-card" style={{display: (session.role === 'ADMIN' || !showUserDashboard) && currentStep === 1 ? undefined : 'none'}} onBlurCapture={scheduleAutoSave}>
           <h2>Applicant Details</h2>
           <div className="field-grid">
+            <div className="full-width" onDragOver={e => { e.preventDefault(); setIdentityDragOver(true); }} onDragLeave={() => setIdentityDragOver(false)} onDrop={e => { e.preventDefault(); setIdentityDragOver(false); const f = e.dataTransfer.files?.[0]; if (f) void fetchIdentityDetails(f); }} style={{ border: `1px dashed ${identityDragOver ? '#2a7ffd' : '#c5d2e8'}`, borderRadius: 10, padding: 12 }}>
+              <strong>Identity - Aadhaar / PAN upload</strong>
+              <label style={{ display: 'flex', gap: 8, alignItems: 'center' }}><input type="checkbox" checked={identityConsent} onChange={e => setIdentityConsent(e.target.checked)} style={{ width: 'auto' }} /><span>I consent to fetching my details from the uploaded Aadhaar / PAN document.</span></label>
+              <input type="file" accept=".pdf,.jpg,.jpeg,.png" disabled={identityFetch.status === 'loading'} onChange={e => { const f = e.target.files?.[0]; if (f) void fetchIdentityDetails(f); e.target.value = ''; }} />
+              <small className="field-hint">PDF, JPG, PNG · Up to 5 MB · or drag and drop here</small>
+              {identityFetch.status === 'loading' && <small className="field-hint" role="status">{identityFetch.message}</small>}
+              {identityFetch.status === 'error' && <small className="field-error" role="alert">{identityFetch.message}</small>}
+              {identityFetch.status === 'success' && <div role="status"><span className="badge success">Fetched from Aadhaar / PAN</span> <small className="field-hint">{identityFetch.message}: {identityFetch.fields.join(', ')}{identityFetch.aadhaar ? ` (Aadhaar ${identityFetch.aadhaar})` : ''}</small></div>}
+            </div>
             <label>Full Name <span className="required-asterisk">*</span><input value={applicant.fullName} onChange={(e) => setApplicant({ ...applicant, fullName: e.target.value.replace(/[^A-Za-z .'-]/g, '') })} onBlur={(e) => { if (e.target.value && !validName(e.target.value)) setValidationMessage("Name should contain letters only."); }} />{applicant.fullName && !validName(applicant.fullName) && <small className="field-error">Name should contain letters only.</small>}</label>
             <label>Date of Birth <span className="required-asterisk">*</span><input type="date" max={new Date().toISOString().slice(0,10)} value={applicant.dateOfBirth} onChange={(e) => setApplicant({ ...applicant, dateOfBirth: e.target.value })} /></label><label>Age<input readOnly value={calculateAge(applicant.dateOfBirth)} /></label>
             <label>PAN Number <span className="required-asterisk">*</span><input maxLength={10} value={applicant.panNumber} onChange={(e) => setApplicant({ ...applicant, panNumber: e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '') })} onBlur={() => setValidationMessage(applicant.panNumber && !validPan(applicant.panNumber) ? "PAN should look like ABCDE1234F." : "")} />{applicant.panNumber && !validPan(applicant.panNumber) && <small className="field-error">PAN should look like ABCDE1234F.</small>}</label>
