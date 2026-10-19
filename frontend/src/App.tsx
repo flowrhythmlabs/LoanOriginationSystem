@@ -251,6 +251,7 @@ function App() {
   const [mockKycMode, setMockKycMode] = useState('SUCCESS');
   const [validationMessage, setValidationMessage] = useState('');
   const [identityConsent, setIdentityConsent] = useState(false);
+  const [step1Attempted, setStep1Attempted] = useState(false);
   const [identityFetch, setIdentityFetch] = useState<{ status: 'idle' | 'loading' | 'success' | 'error'; message: string; fields: string[] }>({ status: 'idle', message: '', fields: [] });
   const [identityDragOver, setIdentityDragOver] = useState<'AADHAAR' | 'PAN' | null>(null);
   const [aadhaarFocused, setAadhaarFocused] = useState(false);
@@ -456,7 +457,7 @@ function App() {
       });
       setApplicantMobileError(validateMobileNumber(app.applicant.mobileNumber));
       setEmployment({
-        employmentType: app.employmentDetails.employmentType,
+        employmentType: app.employmentDetails.employmentType || 'SALARIED',
         employerName: app.employmentDetails.employerName || '',
         designation: app.employmentDetails.designation || '',
         totalWorkExperienceYears: app.employmentDetails.totalWorkExperienceYears ?? '',
@@ -649,7 +650,38 @@ function App() {
   const requiredDocuments = [...employmentChecklist, {key:'ADDRESS_PROOF' as DocumentType,label:'Address proof (approved document)',required:true}, {key:'EXISTING_LOAN_STATEMENTS' as DocumentType,label:'Existing loan statements / sanction letters (if applicable)',required:false}, ...(employment.employmentType === 'BUSINESS_OWNER' ? [{key:'BUSINESS_FINANCIALS' as DocumentType,label:'Balance sheet and profit & loss statements',required:true}] : []), ...loanSpecificDocuments, ...coApplicantDocuments, ...guarantorDocuments];
   const missingDocuments = requiredDocuments.filter((doc) => doc.required && documents[doc.key].status !== 'VERIFIED');
   const requiredDocumentsNotUploaded = requiredDocuments.filter(doc => doc.required && !['UPLOADED','UNDER_REVIEW','VERIFIED'].includes(documents[doc.key].status));
-  const continueDisabledReason = currentStep === 1 && (!applicant.residentialAddress.trim() || !applicant.city.trim() || !applicant.state || !applicant.fullName || !validName(applicant.fullName) || !applicant.dateOfBirth || !validPan(applicant.panNumber) || !validEmail(applicant.email) || (applicant.workEmail !== '' && !validEmail(applicant.workEmail)) || !/^[1-9][0-9]{5}$/.test(applicant.pincode) || !employment.employmentType || Number(employment.monthlyInHandSalary) <= 0 || (employment.employmentType === 'SALARIED' && (!employment.employerName.trim() || !employment.designation.trim())) || (applicant.additionalDetails?.coApplicantRequired === 'true' && (!applicant.additionalDetails?.coApplicantName?.trim() || (applicant.additionalDetails?.coApplicantPan && !validPan(applicant.additionalDetails.coApplicantPan)) || (applicant.additionalDetails?.coApplicantEmail && !validEmail(applicant.additionalDetails.coApplicantEmail))))) ? 'Complete required applicant, contact, employment, income and co-applicant fields first.' : currentStep === 2 && (loanValidationMessage || loanExtraValidationMessage) ? (loanValidationMessage || loanExtraValidationMessage) : currentStep === 3 && (applicant.additionalDetails?.kycBureauConsent !== 'true' || creditScore === null || isCheckingCredit) ? 'Provide consent and wait for KYC and bureau verification to complete before continuing.' : currentStep === 4 && requiredDocumentsNotUploaded.length > 0 ? `Upload all required documents before continuing: ${requiredDocumentsNotUploaded.map(doc => doc.label).join(', ')}.` : '';
+  const step1Missing: string[] = [
+    !applicant.fullName || !validName(applicant.fullName) ? 'Full Name' : '',
+    !applicant.dateOfBirth ? 'Date of Birth' : '',
+    !validPan(applicant.panNumber) ? 'PAN Number' : '',
+    !validEmail(applicant.email) ? 'Email ID' : '',
+    applicant.workEmail !== '' && !validEmail(applicant.workEmail) ? 'Work Email ID' : '',
+    !applicant.residentialAddress.trim() ? 'Residential Address' : '',
+    !applicant.city.trim() ? 'City' : '',
+    !applicant.state ? 'State' : '',
+    !/^[1-9][0-9]{5}$/.test(applicant.pincode) ? 'Pincode' : '',
+    !applicant.additionalDetails?.permanentAddress?.trim() ? 'Permanent Address' : '',
+    !applicant.additionalDetails?.accountType ? 'Account Type' : '',
+    !applicant.additionalDetails?.salaryAccount ? 'Salary Account' : '',
+    !employment.employmentType ? 'Employment Type' : '',
+    Number(employment.monthlyInHandSalary) <= 0 ? 'Monthly Net Salary / Income' : '',
+    employment.employmentType === 'SALARIED' && !employment.employerName.trim() ? 'Employer Name' : '',
+    employment.employmentType === 'SALARIED' && !employment.designation.trim() ? 'Designation' : '',
+    ...(applicant.additionalDetails?.coApplicantRequired === 'true' ? [
+      !applicant.additionalDetails?.coApplicantName?.trim() ? 'Co-applicant Name' : '',
+      applicant.additionalDetails?.coApplicantPan && !validPan(applicant.additionalDetails.coApplicantPan) ? 'Co-applicant PAN' : '',
+      applicant.additionalDetails?.coApplicantEmail && !validEmail(applicant.additionalDetails.coApplicantEmail) ? 'Co-applicant Email' : ''
+    ] : []),
+    ...(applicant.additionalDetails?.guarantorRequired === 'true' ? [
+      !applicant.additionalDetails?.guarantorName?.trim() ? 'Guarantor Name' : '',
+      !applicant.additionalDetails?.guarantorRelationship ? 'Guarantor Relationship' : '',
+      !validPan(applicant.additionalDetails?.guarantorPan || '') ? 'Guarantor PAN' : '',
+      !/^\d{10}$/.test(applicant.additionalDetails?.guarantorMobile || '') ? 'Guarantor Mobile' : '',
+      !validEmail(applicant.additionalDetails?.guarantorEmail || '') ? 'Guarantor Email' : ''
+    ] : [])
+  ].filter(Boolean);
+  const missingStyle = (label: string) => step1Attempted && step1Missing.includes(label) ? { borderColor: '#d92d20', outline: '1px solid #d92d20' } : undefined;
+  const continueDisabledReason = currentStep === 1 && step1Missing.length > 0 ? 'Complete required applicant, contact, employment, income and co-applicant fields first.' : currentStep === 2 && (loanValidationMessage || loanExtraValidationMessage) ? (loanValidationMessage || loanExtraValidationMessage) : currentStep === 3 && (applicant.additionalDetails?.kycBureauConsent !== 'true' || creditScore === null || isCheckingCredit) ? 'Provide consent and wait for KYC and bureau verification to complete before continuing.' : currentStep === 4 && requiredDocumentsNotUploaded.length > 0 ? `Upload all required documents before continuing: ${requiredDocumentsNotUploaded.map(doc => doc.label).join(', ')}.` : '';
   const missingFieldCount = [!applicant.residentialAddress.trim(), !applicant.city.trim(), !applicant.state, !applicant.fullName, !validPan(applicant.panNumber), !validEmail(applicant.email), (applicant.workEmail !== '' && !validEmail(applicant.workEmail)), !/^[1-9][0-9]{5}$/.test(applicant.pincode), !!loanValidationMessage, !!loanExtraValidationMessage].filter(Boolean).length;
 
   const handleSubmit = async () => {
@@ -1107,16 +1139,16 @@ function App() {
             />{applicantMobileError && <span role="alert" style={{ color: '#a61d1d', fontSize: 12 }}>{applicantMobileError}</span>}</label>
             <label>Email ID <span className="required-asterisk">*</span><input type="email" value={applicant.email} onChange={(e) => setApplicant({ ...applicant, email: e.target.value })} onBlur={() => setValidationMessage(applicant.email && !validEmail(applicant.email) ? "Enter a valid email address." : "")} />{applicant.email && !validEmail(applicant.email) && <small className="field-error">Enter a valid email address.</small>}</label>
             <label>Work Email ID<input type="email" value={applicant.workEmail} onChange={(e) => setApplicant({ ...applicant, workEmail: e.target.value })} onBlur={() => setValidationMessage(applicant.workEmail && !validEmail(applicant.workEmail) ? "Enter a valid work email address." : "")} />{applicant.workEmail && !validEmail(applicant.workEmail) && <small className="field-error">Enter a valid work email address.</small>}</label>
-            <details className="full-width" open={identityFetch.status === 'success' || undefined}><summary>Contact address</summary><div className="field-grid">
+            <details className="full-width" open={identityFetch.status === 'success' || step1Attempted || undefined}><summary>Contact address</summary><div className="field-grid">
             <label className="full-width">Residential Address <span className="required-asterisk">*</span>{fetchedTag('residentialAddress')}<input maxLength={250} value={applicant.residentialAddress} onChange={(e) => setApplicant({ ...applicant, residentialAddress: e.target.value })} /><small className="field-hint">{applicant.residentialAddress.length}/250 characters</small></label>
             <label>Years at Current Address<span className="input-suffix-wrap"><input inputMode="numeric" value={applicant.additionalDetails?.yearsAtAddress || ''} onChange={e => setApplicantExtra('yearsAtAddress', e.target.value.replace(/\D/g, '').slice(0, 2))} /><span className="input-suffix">years</span></span></label>
             <label>City <span className="required-asterisk">*</span><input value={applicant.city} onChange={(e) => setApplicant({ ...applicant, city: e.target.value })} /></label>
             <label>State <span className="required-asterisk">*</span>{fetchedTag('state')}<select value={applicant.state} onChange={(e) => setApplicant({ ...applicant, state: e.target.value })}><option value="">Select state</option>{INDIA_STATES.map(state => <option key={state} value={state}>{state}</option>)}</select></label>
             <label>Pincode <span className="required-asterisk">*</span>{fetchedTag('pincode')}<input inputMode="numeric" maxLength={6} value={applicant.pincode} onChange={(e) => setApplicant({ ...applicant, pincode: e.target.value.replace(/\D/g, '').slice(0,6) })} onBlur={() => setValidationMessage(applicant.pincode && !/^[1-9][0-9]{5}$/.test(applicant.pincode) ? "PIN code must be a valid 6-digit Indian PIN code." : "")} />{applicant.pincode && !/^[1-9][0-9]{5}$/.test(applicant.pincode) && <small className="field-error">Enter a valid 6-digit PIN code.</small>}</label>
-            <label className="full-width">Permanent Address <span className="required-asterisk">*</span>{fetchedTag('permanentAddress')}<input maxLength={250} value={applicant.additionalDetails?.permanentAddress || ''} onChange={e => setApplicantExtra('permanentAddress', e.target.value)} /><small className="field-hint">{(applicant.additionalDetails?.permanentAddress || '').length}/250 characters</small></label>
+            <label className="full-width">Permanent Address <span className="required-asterisk">*</span>{fetchedTag('permanentAddress')}<input style={missingStyle('Permanent Address')} maxLength={250} value={applicant.additionalDetails?.permanentAddress || ''} onChange={e => setApplicantExtra('permanentAddress', e.target.value)} /><small className="field-hint">{(applicant.additionalDetails?.permanentAddress || '').length}/250 characters</small></label>
             <label className="full-width">Address Proof Type<select value={applicant.additionalDetails?.addressProofType || ''} onChange={e => setApplicantExtra('addressProofType', e.target.value)}><option value="">Select</option>{['Aadhaar Card', 'Passport', 'Voter ID', 'Electricity Bill', 'Driving License'].map(t => <option key={t} value={t}>{t}</option>)}</select></label>
             </div></details>
-            <details className="full-width" open={identityFetch.status === 'success' || undefined}><summary>Additional personal, identity, bank, co-applicant and guarantor details</summary><div className="field-grid">
+            <details className="full-width" open={identityFetch.status === 'success' || step1Attempted || undefined}><summary>Additional personal, identity, bank, co-applicant and guarantor details</summary><div className="field-grid">
             <label>Gender{fetchedTag('gender')}<select value={applicant.additionalDetails?.gender || ''} onChange={e => setApplicantExtra('gender', e.target.value)}><option value="">Select</option><option>Female</option><option>Male</option><option>Other</option></select></label>
             <label>Father's Name{fetchedTag('fatherName')}<input value={applicant.additionalDetails?.fatherName || ''} onChange={e => setApplicantExtra('fatherName', e.target.value.replace(/[^A-Za-z .'-]/g,''))} /></label>
             <label>Mother's Name<input value={applicant.additionalDetails?.motherName || ''} onChange={e => setApplicantExtra('motherName', e.target.value.replace(/[^A-Za-z .'-]/g,''))} /></label>
@@ -1136,8 +1168,8 @@ function App() {
             <label>IFSC Code<span className="ifsc-input-wrap"><input maxLength={11} value={applicant.additionalDetails?.ifscCode || ''} onChange={e => setApplicantExtra('ifscCode', e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))} onBlur={() => setIfscMessages(prev => ({...prev, applicant: applicant.additionalDetails?.ifscCode && !/^[A-Z]{4}0[A-Z0-9]{6}$/.test(applicant.additionalDetails.ifscCode) ? {text:'IFSC must be 11 characters, e.g. ABCD0123456.',error:true} : {text:'',error:false}}))} /><button type="button" className="secondary ifsc-finder" onClick={() => void lookupIfsc('applicant', applicant.additionalDetails?.ifscCode || '', 'bankName', 'bankBranch')}>Find IFSC</button></span>{ifscMessages.applicant?.text && <small className={ifscMessages.applicant.error ? 'field-error' : 'field-success'}>{ifscMessages.applicant.text}</small>}</label>
             <label>Bank Name<input value={applicant.additionalDetails?.bankName || ''} onChange={e => setApplicantExtra('bankName', e.target.value)} /></label>
             <label>Bank Branch<input value={applicant.additionalDetails?.bankBranch || ''} onChange={e => setApplicantExtra('bankBranch', e.target.value)} /></label>
-            <label>Account Type<select value={applicant.additionalDetails?.accountType || ''} onChange={e => setApplicantExtra('accountType', e.target.value)}><option value="">Select</option><option>Savings</option><option>Current</option></select></label>
-            <label>Salary Account<select value={applicant.additionalDetails?.salaryAccount || ''} onChange={e => setApplicantExtra('salaryAccount', e.target.value)}><option value="">Select</option><option>Yes</option><option>No</option></select></label>
+            <label>Account Type<select style={missingStyle('Account Type')} value={applicant.additionalDetails?.accountType || ''} onChange={e => setApplicantExtra('accountType', e.target.value)}><option value="">Select</option><option>Savings</option><option>Current</option></select></label>
+            <label>Salary Account<select style={missingStyle('Salary Account')} value={applicant.additionalDetails?.salaryAccount || ''} onChange={e => setApplicantExtra('salaryAccount', e.target.value)}><option value="">Select</option><option>Yes</option><option>No</option></select></label>
             </div></div>
             <label className="checkbox-field full-width"><input type="checkbox" checked={applicant.additionalDetails?.coApplicantRequired === 'true'} onChange={e => toggleCoApplicant(e.target.checked)} /> Add a co-applicant</label>
             {applicant.additionalDetails?.coApplicantRequired === 'true' && <div ref={coApplicantRef} className="full-width coapplicant-card"><h3>Co-applicant Details</h3><div className="field-grid">
@@ -1233,7 +1265,6 @@ function App() {
             {employment.employmentType !== 'SALARIED' && <label>Total Experience / Years in Profession<input type="number" min="0" value={employment.totalWorkExperienceYears} onChange={(e) => setEmployment({ ...employment, totalWorkExperienceYears: e.target.value })} /></label>}
             <label>{employment.employmentType === 'SALARIED' ? 'Monthly Net Salary' : 'Monthly Net Income'}<input type="number" min="1" value={employment.monthlyInHandSalary} onChange={(e) => setEmployment({ ...employment, monthlyInHandSalary: e.target.value })} /></label>
             <label>{employment.employmentType === 'SALARIED' ? 'Monthly Gross Salary' : 'Monthly Gross Receipts'}<input type="number" min="0" value={employment.monthlyGrossSalary} onChange={(e) => setEmployment({ ...employment, monthlyGrossSalary: e.target.value })} /></label>
-            <details className="full-width"><summary>Additional employment, business, financial and bank details</summary><div className="field-grid">
             {employment.employmentType === 'SALARIED' && <>
               <label>Employer Address<input value={employment.additionalDetails?.employerAddress || ''} onChange={e => setEmploymentExtra('employerAddress', e.target.value)} /></label>
               <label>Official Email<input type="email" value={employment.additionalDetails?.officialEmail || ''} onChange={e => setEmploymentExtra('officialEmail', e.target.value)} onBlur={() => setValidationMessage(employment.additionalDetails?.officialEmail && !validEmail(employment.additionalDetails.officialEmail) ? 'Enter a valid employer official email address.' : '')} />{employment.additionalDetails?.officialEmail && !validEmail(employment.additionalDetails.officialEmail) && <small className="field-error">Enter a valid employer official email address.</small>}</label>
@@ -1285,7 +1316,6 @@ function App() {
               <label>ITR Acknowledgement Number<input value={employment.additionalDetails?.itrNumber || ''} onChange={e => setEmploymentExtra('itrNumber', e.target.value)} /></label>
               <label className="full-width">Existing Loans / Obligations<input value={employment.additionalDetails?.existingLoans || ''} onChange={e => setEmploymentExtra('existingLoans', e.target.value)} /></label>
             </>}
-            </div></details>
             <div className="eligibility-box">
               <h3>Initial affordability indicator</h3>
               <p>{Number(employment.monthlyInHandSalary || 0) > 0 ? 'Looking good — your income details are captured. Final affordability depends on existing obligations, bureau information and product policy.' : 'Add your monthly income to see an initial affordability indicator.'}</p>
@@ -1487,7 +1517,7 @@ function App() {
           </section>
         )}
 
-        {session.role === 'USER' && !showUserDashboard && !submittedApplication && <div className="inline-actions" style={{position:'sticky',bottom:0,background:'var(--surface, #fff)',padding:'12px 0',zIndex:5}}><button className="secondary" disabled={currentStep === 1} onClick={() => setCurrentStep(s => Math.max(1,s-1))}>Back</button><button className="secondary" onClick={handleSaveDraft} disabled={isCreatingApplication}>Save Draft</button><button className="primary" disabled={Boolean(continueDisabledReason)} title={continueDisabledReason || undefined} onClick={() => { if (currentStep === 1) { const errors = [!applicant.residentialAddress.trim() && 'Residential address is required', !applicant.city.trim() && 'City is required', !applicant.state && 'State is required', !applicant.fullName && 'Full name is required', !validPan(applicant.panNumber) && 'PAN should look like ABCDE1234F', !validEmail(applicant.email) && 'Enter a valid email address', !/^[1-9][0-9]{5}$/.test(applicant.pincode) && 'Enter a valid 6-digit PIN code'].filter(Boolean); if (errors.length) { setValidationMessage(errors.join('. ')); return; } } if (currentStep === 2 && (loanValidationMessage || loanExtraValidationMessage)) { setValidationMessage(loanValidationMessage || loanExtraValidationMessage); return; } if (currentStep === 4 && requiredDocumentsNotUploaded.length > 0) { setValidationMessage(`Upload all required documents before continuing: ${requiredDocumentsNotUploaded.map(doc => doc.label).join(', ')}.`); return; } if (currentStep < 5) { setHighestUnlockedStep(s => Math.max(s, currentStep + 1)); setCurrentStep(s => s+1); setValidationMessage(''); } else void handleSubmit(); }}>{currentStep === 5 ? 'Submit Application' : 'Continue'}</button><span style={{alignSelf:'center',fontSize:12,color:'#64748b'}}>Step {currentStep} of 5 · {saveIndicator || (applicationId ? 'Saved draft' : 'Not saved yet')}{continueDisabledReason ? ` · ${continueDisabledReason}` : ''}</span></div>}
+        {session.role === 'USER' && !showUserDashboard && !submittedApplication && <div className="inline-actions" style={{position:'sticky',bottom:0,background:'var(--surface, #fff)',padding:'12px 0',zIndex:5}}><button className="secondary" disabled={currentStep === 1} onClick={() => setCurrentStep(s => Math.max(1,s-1))}>Back</button><button className="secondary" onClick={handleSaveDraft} disabled={isCreatingApplication}>Save Draft</button><button className="primary" disabled={Boolean(continueDisabledReason) && currentStep !== 1} title={continueDisabledReason || undefined} onClick={() => { if (currentStep === 1) { if (step1Missing.length) { console.log('Missing fields:', step1Missing); setStep1Attempted(true); setValidationMessage(`Complete required fields: ${step1Missing.join(', ')}.`); return; } } if (currentStep === 2 && (loanValidationMessage || loanExtraValidationMessage)) { setValidationMessage(loanValidationMessage || loanExtraValidationMessage); return; } if (currentStep === 4 && requiredDocumentsNotUploaded.length > 0) { setValidationMessage(`Upload all required documents before continuing: ${requiredDocumentsNotUploaded.map(doc => doc.label).join(', ')}.`); return; } if (currentStep < 5) { setHighestUnlockedStep(s => Math.max(s, currentStep + 1)); setCurrentStep(s => s+1); setValidationMessage(''); } else void handleSubmit(); }}>{currentStep === 5 ? 'Submit Application' : 'Continue'}</button><span style={{alignSelf:'center',fontSize:12,color:'#64748b'}}>Step {currentStep} of 5 · {saveIndicator || (applicationId ? 'Saved draft' : 'Not saved yet')}{continueDisabledReason ? ` · ${continueDisabledReason}` : ''}</span></div>}
 
         {session.role === 'ADMIN' && (
           <section className="card table-card">
