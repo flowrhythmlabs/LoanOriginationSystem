@@ -581,3 +581,7 @@ label:has(> .required-asterisk) > .field-success {
 .fetched-tag { margin-left: 6px; padding: 2px 8px; }
 .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid #c5d2e8; border-top-color: #2a7ffd; border-radius: 50%; vertical-align: middle; animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+.input-suffix-wrap { position: relative; display: block; }
+.input-suffix-wrap input { padding-right: 52px; }
+.input-suffix { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); color: #64748b; font-size: .85rem; pointer-events: none; }
