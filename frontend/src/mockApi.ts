@@ -24,18 +24,7 @@ export async function demoFetch(input:RequestInfo|URL, init:RequestInit = {}):Pr
   await delay();
   const method = (init.method || 'GET').toUpperCase();
   const body = ():Obj => { try { return JSON.parse(String(init.body || '{}')); } catch { return {}; } };
-  if (path === '/api/auth/otp/request' && method === 'POST') {
-    const {mobileNumber,termsAccepted} = body();
-    if (!/^\d{10}$/.test(String(mobileNumber||''))) return error('Enter a valid 10-digit mobile number.');
-    if (termsAccepted !== 'true') return error('Accept the terms to continue.');
-    sessionStorage.setItem('finedge-demo-otp-mobile',String(mobileNumber));
-    return json({message:'Demo OTP generated. No SMS was sent.',demoOtp:'123456'});
-  }
-  if (path === '/api/auth/login/user' && method === 'POST') {
-    const {mobileNumber,otp} = body();
-    if (mobileNumber !== sessionStorage.getItem('finedge-demo-otp-mobile') || otp !== '123456') return error('Invalid demo OTP. Enter 123456.',401);
-    return json({accessToken:`demo-user-${mobileNumber}`});
-  }
+  if (path === '/api/auth/otp/request' || (path === '/api/auth/login/user' && method === 'POST')) return fetch(input,init);
   if (path === '/api/auth/login/admin' && method === 'POST') {
     const {username,password} = body();
     if (username !== 'demo.admin' || password !== 'Demo@123') return error('Invalid demo admin credentials.',401);

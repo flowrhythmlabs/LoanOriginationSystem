@@ -1,9 +1,8 @@
 import { demoFetch } from './mockApi';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { clearAuth, persistAuth, readStoredAuth, type AuthSession } from './auth';
 
 const initialMode = 'user';
-const demoMode = true;
 
 type LoginMode = 'user' | 'admin';
 
@@ -11,7 +10,7 @@ type UserLoginState = {
   mobile: string;
   otp: string;
   otpSent: boolean;
-  demoOtp: string;
+  challengeToken: string;
   otpError: string;
   authError: string;
 };
@@ -27,14 +26,16 @@ export function LoginPage({ onAuthenticated }: { onAuthenticated: (session: Auth
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showAdminPassword, setShowAdminPassword] = useState(false);
   const [consentAccepted, setConsentAccepted] = useState(false);
+  const [termsError, setTermsError] = useState(false);
   const [otpAttemptsRemaining, setOtpAttemptsRemaining] = useState(3);
   const [resendSeconds, setResendSeconds] = useState(0);
+  const verifyingRef = useRef(false);
   useEffect(() => { if (resendSeconds <= 0) return; const timer = window.setTimeout(() => setResendSeconds(value => value - 1), 1000); return () => window.clearTimeout(timer); }, [resendSeconds]);
   const [userState, setUserState] = useState<UserLoginState>({
     mobile: '',
     otp: '',
     otpSent: false,
-    demoOtp: '',
+    challengeToken: '',
     otpError: '',
     authError: ''
   });
@@ -48,7 +49,8 @@ export function LoginPage({ onAuthenticated }: { onAuthenticated: (session: Auth
 
   const onUserSendOtp = async () => {
     const mobile = userState.mobile;
-    if (!consentAccepted) { setUserState((prev) => ({ ...prev, otpError: 'Please accept the terms and privacy notice to continue.' })); return; }
+    if (!consentAccepted) { setTermsError(true); return; }
+    setTermsError(false);
     if (!/^\d{10}$/.test(mobile)) {
       setUserState((prev) => ({ ...prev, otpError: 'Please enter a valid 10-digit mobile number.' }));
       return;
@@ -60,14 +62,18 @@ export function LoginPage({ onAuthenticated }: { onAuthenticated: (session: Auth
         body: JSON.stringify({ mobileNumber: mobile, termsAccepted: String(consentAccepted), consentVersion: 'v1' })
       });
       const result = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(result.message || 'OTP could not be sent. Please try again later.');
-      setUserState((prev) => ({ ...prev, otpSent: true, demoOtp: demoMode ? (result.demoOtp || '') : '', otp: '', otpError: '', authError: '' })); setOtpAttemptsRemaining(3); setResendSeconds(30);
+      if (!response.ok) {
+        if (typeof result.retryAfter === 'number' && result.retryAfter <= 600) setResendSeconds(result.retryAfter);
+        throw new Error(result.message || 'OTP could not be sent. Please try again later.');
+      }
+      setUserState((prev) => ({ ...prev, otpSent: true, challengeToken: String(result.challengeToken || ''), otp: '', otpError: '', authError: '' })); setOtpAttemptsRemaining(3); setResendSeconds(Number(result.resendAfterSeconds) || 30);
     } catch (error) {
-      setUserState((prev) => ({ ...prev, otpError: error instanceof Error ? error.message : 'OTP request failed.' }));
+      setUserState((prev) => ({ ...prev, otpError: error instanceof Error && error.name !== 'TypeError' ? error.message : 'Network error. Check your connection and try again.' }));
     } finally { setIsSubmitting(false); }
   };
 
   const onUserVerifyOtp = async () => {
+    if (verifyingRef.current) return;
     const mobile = userState.mobile;
     if (!/^\d{10}$/.test(mobile)) {
       setUserState((prev) => ({ ...prev, authError: 'Please enter a valid 10-digit mobile number.' }));
@@ -78,10 +84,11 @@ export function LoginPage({ onAuthenticated }: { onAuthenticated: (session: Auth
       return;
     }
     setIsSubmitting(true);
+    verifyingRef.current = true;
     try {
       const response = await demoFetch('/api/auth/login/user', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mobileNumber: mobile, otp: userState.otp })
+        body: JSON.stringify({ mobileNumber: mobile, otp: userState.otp, challengeToken: userState.challengeToken })
       });
       const result = await response.json().catch(() => ({}));
       if (!response.ok || !result.accessToken) throw new Error(result.message || 'OTP verification failed.');
@@ -89,7 +96,7 @@ export function LoginPage({ onAuthenticated }: { onAuthenticated: (session: Auth
       persistAuth(session); onAuthenticated(session);
     } catch (error) {
       setOtpAttemptsRemaining(value => Math.max(0, value - 1)); setUserState((prev) => ({ ...prev, otp: '', authError: `${error instanceof Error ? error.message : 'OTP verification failed.'} ${Math.max(0, otpAttemptsRemaining - 1)} attempts left.` }));
-    } finally { setIsSubmitting(false); }
+    } finally { verifyingRef.current = false; setIsSubmitting(false); }
   };
 
   useEffect(() => {
@@ -135,7 +142,6 @@ export function LoginPage({ onAuthenticated }: { onAuthenticated: (session: Auth
         <div className="design-illustration" aria-hidden="true"><img src="/login-illustration.png" alt="" /><div className="illustration-slogan">Build<br/>Your Future<br/>with Us</div></div>
       </aside>
       <div className="auth-card">
-        {demoMode && <div className="auth-demo-box" role="status">Demo environment</div>}
         <div className="new-login-top"><span>◎ English⌄</span></div>
         {mode === 'user' && (
           <div className="auth-form">
@@ -154,7 +160,7 @@ export function LoginPage({ onAuthenticated }: { onAuthenticated: (session: Auth
                     setUserState((prev) => ({ ...prev, authError: 'Mobile number must contain digits only.', otpError: '' }));
                     return;
                   }
-                  setUserState((prev) => ({ ...prev, mobile: value.slice(0, 10), otpSent: false, demoOtp: '', otp: '', authError: '', otpError: '' })); setConsentAccepted(false);
+                  setUserState((prev) => ({ ...prev, mobile: value.slice(0, 10), otpSent: false, challengeToken: '', otp: '', authError: '', otpError: '' })); setConsentAccepted(false);
                 }}
                 onPaste={(event) => {
                   if (/\D/.test(event.clipboardData.getData('text'))) {
@@ -176,9 +182,9 @@ export function LoginPage({ onAuthenticated }: { onAuthenticated: (session: Auth
               </div>
               <div className="login-otp-help"><span>{userState.otpSent ? 'OTP verifies automatically after all 6 digits are entered.' : 'Enter your mobile number and select Continue to receive an OTP.'}</span>{userState.otpSent && <button type="button" className="login-resend" onClick={onUserSendOtp} disabled={isSubmitting || resendSeconds > 0}>{resendSeconds > 0 ? `Resend in ${resendSeconds}s` : 'Resend OTP'}</button>}</div>
             </label>}
-            {userState.demoOtp && demoMode && <div className="auth-demo-box"><span>Demo OTP</span><strong>{userState.demoOtp}</strong></div>}
-            <label className="auth-field auth-consent"><input type="checkbox" checked={consentAccepted} disabled={userState.otpSent} onChange={e => setConsentAccepted(e.target.checked)} /><span>I agree to the <a href="/terms.html" target="_blank" rel="noreferrer">Terms &amp; Conditions</a> and <a href="/privacy.html" target="_blank" rel="noreferrer">Privacy Policy</a>.</span></label>
-            <button type="button" className="primary auth-submit" onClick={userState.otpSent ? onUserVerifyOtp : onUserSendOtp} disabled={isSubmitting || (!userState.otpSent && !consentAccepted) || (userState.otpSent && userState.otp.length !== 6)}>
+            <label className={`auth-field auth-consent${termsError ? ' has-error' : ''}`}><input type="checkbox" checked={consentAccepted} disabled={userState.otpSent} aria-invalid={termsError} aria-describedby={termsError ? 'terms-error' : undefined} onChange={e => { setConsentAccepted(e.target.checked); if (e.target.checked) setTermsError(false); }} /><span>I agree to the <a href="/terms.html" target="_blank" rel="noreferrer">Terms &amp; Conditions</a> and <a href="/privacy.html" target="_blank" rel="noreferrer">Privacy Policy</a>.</span></label>
+            {termsError && <div id="terms-error" className="terms-error" role="alert">Please select Terms &amp; Conditions to continue.</div>}
+            <button type="button" className="primary auth-submit" onClick={userState.otpSent ? onUserVerifyOtp : onUserSendOtp} disabled={isSubmitting || (userState.otpSent && userState.otp.length !== 6)}>
               {isSubmitting ? (userState.otpSent ? 'Verifying...' : 'Sending OTP...') : (userState.otpSent ? 'Login' : 'Continue')}
             </button>
             {userState.otpError && <div className="auth-error">{userState.otpError}</div>}
