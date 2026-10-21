@@ -11,7 +11,7 @@ This is a **simulated demonstration**, not a production loan origination service
 
 ## Demo access
 
-- Applicant: any 10-digit mobile number, accept consent, click Continue, then enter **123456**. No SMS is sent.
+- Applicant: configure `TWOFACTOR_API_KEY` and `OTP_CHALLENGE_SECRET` as server-side Netlify environment variables (see `frontend/.env.example`). Enter an Indian mobile number beginning with 6–9 that you control, accept consent, click Continue, and enter the six-digit OTP delivered by SMS through 2Factor. There is no fixed demo OTP.
 - Staff: choose Staff login; username **demo.admin**, password **Demo@123**. These credentials are **public demo credentials**, not security controls.
 - KYC, bureau results, credit score and interest rates are simulated.
 - Drafts, application data and uploaded document metadata are stored in the current browser's localStorage. Document binary data is NOT stored; document previews are unavailable after upload. A different browser/device will not see the same data.
