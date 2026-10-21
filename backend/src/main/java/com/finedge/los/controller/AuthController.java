@@ -39,7 +39,7 @@ public class AuthController {
         String otp = sessions.requestOtp(mobile);
         logger.info("OTP requested for mobile {}: {}", mobile, otp);
         response.put("message", "OTP request accepted.");
-        if (sessions.isDemoOtpEnabled() ==false) response.put("demoOtp", otp);
+        if (sessions.isDemoOtpEnabled()) response.put("demoOtp", otp);
         else {
             try { smsSender.send(mobile, otp); }
             catch (RuntimeException e) { sessions.invalidateOtp(mobile); response.put("message", "SMS delivery failed. Please retry later."); return ResponseEntity.status(503).body(response); }
