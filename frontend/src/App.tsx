@@ -1,4 +1,4 @@
-import { demoFetch } from './mockApi';
+import { UnderwritingWorkspace } from './UnderwritingWorkspace';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { LoginPage } from './LoginPage';
 import { buildAuthHeaders, clearAuth, readStoredAuth, type AuthSession } from './auth';
@@ -92,7 +92,7 @@ const initialEmployment: Employment = {
 const initialLoanDetails: LoanDetails = {
   loanType: 'PERSONAL_LOAN',
   requestedLoanAmount: '',
-  interestRate: 10.5,
+  interestRate: '',
   preferredTenure: 36,
   purposeOfLoan: '',
   additionalDetails: { processingFees: '0', gstOnFees: '0', insuranceCharges: '0', scheduledDisbursalDate: '', coApplicantRequired: 'false', guarantorRequired: 'false' }
@@ -227,7 +227,13 @@ function App() {
   const [applicantMobileError, setApplicantMobileError] = useState('');
   const [employment, setEmployment] = useState<Employment>(initialEmployment);
   const [loanDetails, setLoanDetails] = useState<LoanDetails>(initialLoanDetails);
+  const [showRepaymentSchedule, setShowRepaymentSchedule] = useState(false);
+  const [pricingPolicy, setPricingPolicy] = useState<{minAmount?:number;maxAmount?:number;minTenure?:number;maxTenure?:number;processingFeePercent?:number;gstPercent?:number;insurancePremium?:number;rateType?:string}>({});
+  const [staffApplicationOpen, setStaffApplicationOpen] = useState(false);
+  const [showUnderwriting, setShowUnderwriting] = useState(false);
   const [creditScore, setCreditScore] = useState<number | null>(null);
+  const [creditMode, setCreditMode] = useState<'MANUAL' | 'ONLINE'>('MANUAL');
+  const [manualCreditScore, setManualCreditScore] = useState('');
   const [status, setStatus] = useState('DRAFT');
   const [submittedApplication, setSubmittedApplication] = useState<{ losNumber?: string; status?: string; createdAt?: string } | null>(null);
   const [applications, setApplications] = useState<ApplicationRow[]>([]);
@@ -261,7 +267,7 @@ function App() {
       authHeaders.forEach((value, key) => headers.set(key, value));
     }
 
-    const response = await demoFetch(input, { ...init, headers });
+    const response = await fetch(input, { ...init, headers });
     // Do not clear the applicant session on an individual API error. In particular, a
     // submit/validation 401/403 must be shown as an error, not look like a logout.
     return response;
@@ -287,6 +293,7 @@ function App() {
         if (!response.ok) throw new Error(result?.message || 'Loan pricing could not be loaded.');
         if (!cancelled && result.interestRate !== undefined && result.interestRate !== null) {
           setLoanDetails((previous) => ({ ...previous, interestRate: result.interestRate }));
+          setPricingPolicy({ minAmount: Number(result.minAmount ?? result.minLoanAmount) || undefined, maxAmount: Number(result.maxAmount ?? result.maxLoanAmount) || undefined, minTenure: Number(result.minTenure ?? result.minTenureMonths) || undefined, maxTenure: Number(result.maxTenure ?? result.maxTenureMonths) || undefined, processingFeePercent: Number(result.processingFeePercent ?? 0), gstPercent: Number(result.gstPercent ?? 0), insurancePremium: Number(result.insurancePremium ?? 0), rateType: String(result.rateType || "REDUCING_BALANCE") });
         }
       })
       .catch(() => undefined);
@@ -306,18 +313,6 @@ function App() {
     } catch {
       setApplications([]);
     }
-  };
-
-  const handleDemoDecision = async (id: number, decision: 'APPROVED' | 'REJECTED' | 'UNDER_REVIEW') => {
-    const reason = decision === 'REJECTED' ? window.prompt('Enter demo rejection reason:', 'Demo credit-policy decision') : 'Simulated management decision';
-    if (reason === null) return;
-    try {
-      const response = await apiFetch(`/api/admin/applications/${id}/decision`, {method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:decision,reason})});
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.message || 'Decision could not be saved.');
-      await fetchApplications();
-      setValidationMessage(`Demo application ${result.losNumber || id}: ${decision.replaceAll('_',' ')}.`);
-    } catch (err) {setValidationMessage(err instanceof Error ? err.message : 'Decision failed.');}
   };
 
   const fetchDocuments = async (id: number) => {
@@ -353,7 +348,6 @@ function App() {
       setDocuments(createInitialDocuments());
     }
   };
-
   const optionalNumber = (value: string | number | null | undefined) => value === '' || value === null || value === undefined || !Number.isFinite(Number(value)) ? null : Number(value);
   const buildApplicationPayload = () => ({
     applicant: { ...applicant, dateOfBirth: applicant.dateOfBirth || null },
@@ -371,7 +365,10 @@ function App() {
       purposeOfLoan: loanDetails.purposeOfLoan || null,
       additionalDetails: {
         ...(loanDetails.additionalDetails || {}),
-        netDisbursal: String(Math.max(0, Number(loanDetails.requestedLoanAmount || 0) - Number(loanDetails.additionalDetails?.processingFees || 0) - Number(loanDetails.additionalDetails?.gstOnFees || 0) - Number(loanDetails.additionalDetails?.insuranceCharges || 0)))
+        processingFees: String(calculatedFees.processing),
+        gstOnFees: String(calculatedFees.gst),
+        insuranceCharges: String(calculatedFees.insurance),
+        netDisbursal: String(calculatedFees.net)
       }
     }
   });
@@ -469,7 +466,10 @@ function App() {
         purposeOfLoan: app.loanDetails.purposeOfLoan || '',
         additionalDetails: { ...initialLoanDetails.additionalDetails, ...(app.loanDetails.additionalDetails || {}) }
       });
+      setStaffApplicationOpen(true);
       setCreditScore(app.creditCheck?.creditScore ?? null);
+      setManualCreditScore(app.applicant?.additionalDetails?.selfReportedCreditScore || '');
+      setCreditMode(app.applicant?.additionalDetails?.creditScoreMode === 'ONLINE' ? 'ONLINE' : 'MANUAL');
       setStatus(app.status);
       setSubmittedApplication(app.status === 'SUBMITTED' ? app : null);
       setCurrentStep(app.status === 'SUBMITTED' ? 5 : app.creditCheck ? 4 : 1);
@@ -511,9 +511,21 @@ function App() {
     if (!Number.isFinite(tenure) || tenure <= 0 || !Number.isInteger(tenure)) {
       return 'Preferred tenure must be a valid whole number of months.';
     }
+    if (pricingPolicy.minAmount && principal < pricingPolicy.minAmount) return 'Loan amount is below the product minimum.';
+    if (pricingPolicy.maxAmount && principal > pricingPolicy.maxAmount) return 'Loan amount exceeds the product maximum.';
+    const increment = ['HOME_LOAN', 'CAR_LOAN', 'VEHICLE_LOAN', 'LOAN_AGAINST_PROPERTY'].includes(loanDetails.loanType) ? 10000 : 1000;
+    if (principal % increment !== 0) return `Loan amount must be a multiple of ₹${increment.toLocaleString('en-IN')}.`;
+    if (pricingPolicy.minTenure && tenure < pricingPolicy.minTenure) return 'Tenure is below the product minimum.';
+    if (pricingPolicy.maxTenure && tenure > pricingPolicy.maxTenure) return 'Tenure exceeds the product maximum.';
     return '';
-  }, [loanDetails.requestedLoanAmount, loanDetails.interestRate, loanDetails.preferredTenure]);
-
+  }, [loanDetails.requestedLoanAmount, loanDetails.interestRate, loanDetails.preferredTenure, loanDetails.loanType, pricingPolicy]);
+  const calculatedFees = useMemo(() => {
+    const amount = Math.max(0, Number(loanDetails.requestedLoanAmount) || 0);
+    const processing = Math.round(amount * (pricingPolicy.processingFeePercent || 0) / 100 * 100) / 100;
+    const gst = Math.round(processing * (pricingPolicy.gstPercent || 0) / 100 * 100) / 100;
+    const insurance = pricingPolicy.insurancePremium || 0;
+    return { processing, gst, insurance, total: processing + gst + insurance, net: Math.max(0, amount - processing - gst - insurance) };
+  }, [loanDetails.requestedLoanAmount, pricingPolicy]);
   const loanExtraValidationMessage = useMemo(() => { const fields = [['Processing fees', loanDetails.additionalDetails?.processingFees], ['GST on fees', loanDetails.additionalDetails?.gstOnFees], ['Insurance charges', loanDetails.additionalDetails?.insuranceCharges]]; for (const [name, value] of fields) { if (value !== undefined && value !== '' && (!Number.isFinite(Number(value)) || Number(value) < 0)) return `${name} must be zero or greater.`; } const charges = Number(loanDetails.additionalDetails?.processingFees || 0) + Number(loanDetails.additionalDetails?.gstOnFees || 0) + Number(loanDetails.additionalDetails?.insuranceCharges || 0); if (charges > Number(loanDetails.requestedLoanAmount || 0)) return 'Total fees and charges cannot exceed the requested loan amount.'; const scheduled = loanDetails.additionalDetails?.scheduledDisbursalDate; if (scheduled && scheduled < new Date().toISOString().slice(0,10)) return 'Scheduled disbursal date cannot be in the past.'; return ''; }, [loanDetails.additionalDetails]);
 
   const emiSummary = useMemo(() => {
@@ -572,6 +584,8 @@ function App() {
 
   const handleRunCreditCheck = async () => {
     if (isCheckingCredit) return;
+    if (creditMode !== 'ONLINE') { setValidationMessage('Select Check Online to request a bureau credit score.'); return; }
+    if (applicant.additionalDetails?.kycBureauConsent !== 'true') { setValidationMessage('Please provide consent before requesting a bureau enquiry.'); return; }
     setIsCheckingCredit(true);
     setKycMessage('Connecting to KYC provider and fetching credit bureau details…');
     try {
@@ -632,12 +646,12 @@ function App() {
     }
   };
 
+  // Consent is recorded on change; bureau calls occur ONLY when Check Online is clicked.
   useEffect(() => {
-    if (session?.role === 'USER' && currentStep === 3 && applicant.additionalDetails?.kycBureauConsent === 'true' && creditScore === null && status !== 'CREDIT_CHECK_COMPLETED') {
-      void handleRunCreditCheck();
+    if (currentStep === 3 && (session?.role === 'USER' || staffApplicationOpen) && !applicationId && !isCreatingApplication) {
+      void ensureApplication().catch(error => setValidationMessage(error instanceof Error ? error.message : 'Unable to create temporary application ID.'));
     }
-  }, [session, currentStep, applicant.additionalDetails?.kycBureauConsent, creditScore, status]);
-
+  }, [currentStep, applicationId, session?.role, staffApplicationOpen]);
   const employmentChecklist = DOCUMENTS_BY_EMPLOYMENT[employment.employmentType] || REQUIRED_DOCUMENTS;
   const loanSpecificDocuments: Array<{key: DocumentType; label: string; required: boolean}> = (loanDetails.loanType === 'HOME_LOAN' || loanDetails.loanType === 'LOAN_AGAINST_PROPERTY') ? [{key:'PROPERTY_DOCUMENTS',label:'Property documents (title deed, sale agreement, approved plan, valuation, tax receipt)',required:true}] : loanDetails.loanType === 'CAR_LOAN' ? [{key:'VEHICLE_DOCUMENTS',label:'Vehicle quotation / proforma invoice and insurance',required:true}] : loanDetails.loanType === 'EDUCATION_LOAN' ? [{key:'EDUCATION_DOCUMENTS',label:'Admission letter, fee structure and education records',required:true}] : [];
   const coApplicantDocuments = applicant.additionalDetails?.coApplicantRequired === 'true' && applicant.additionalDetails?.coApplicantName?.trim() ? [{key:'COAPPLICANT_PAN' as DocumentType,label:'Co-applicant PAN',required:true},{key:'COAPPLICANT_KYC' as DocumentType,label:'Co-applicant KYC / Aadhaar document',required:true},{key:'COAPPLICANT_BANK_STATEMENT' as DocumentType,label:'Co-applicant bank statement (if earning)',required:applicant.additionalDetails?.coApplicantType === 'Earning'},{key:'COAPPLICANT_PHOTOGRAPH' as DocumentType,label:'Co-applicant photograph',required:true},{key:'COAPPLICANT_SIGNATURE' as DocumentType,label:'Co-applicant signature / e-sign',required:true}] : [];
@@ -645,7 +659,7 @@ function App() {
   const requiredDocuments = [...employmentChecklist, {key:'ADDRESS_PROOF' as DocumentType,label:'Address proof (approved document)',required:true}, {key:'EXISTING_LOAN_STATEMENTS' as DocumentType,label:'Existing loan statements / sanction letters (if applicable)',required:false}, ...(employment.employmentType === 'BUSINESS_OWNER' ? [{key:'BUSINESS_FINANCIALS' as DocumentType,label:'Balance sheet and profit & loss statements',required:true}] : []), ...loanSpecificDocuments, ...coApplicantDocuments, ...guarantorDocuments];
   const missingDocuments = requiredDocuments.filter((doc) => doc.required && documents[doc.key].status !== 'VERIFIED');
   const requiredDocumentsNotUploaded = requiredDocuments.filter(doc => doc.required && !['UPLOADED','UNDER_REVIEW','VERIFIED'].includes(documents[doc.key].status));
-  const continueDisabledReason = currentStep === 1 && (!applicant.fullName || !validName(applicant.fullName) || !applicant.dateOfBirth || !validPan(applicant.panNumber) || !validEmail(applicant.email) || (applicant.workEmail !== '' && !validEmail(applicant.workEmail)) || !/^[1-9][0-9]{5}$/.test(applicant.pincode) || !employment.employmentType || Number(employment.monthlyInHandSalary) <= 0 || (employment.employmentType === 'SALARIED' && (!employment.employerName.trim() || !employment.designation.trim())) || (applicant.additionalDetails?.coApplicantRequired === 'true' && (!applicant.additionalDetails?.coApplicantName?.trim() || (applicant.additionalDetails?.coApplicantPan && !validPan(applicant.additionalDetails.coApplicantPan)) || (applicant.additionalDetails?.coApplicantEmail && !validEmail(applicant.additionalDetails.coApplicantEmail))))) ? 'Complete required applicant, contact, employment, income and co-applicant fields first.' : currentStep === 2 && (loanValidationMessage || loanExtraValidationMessage) ? (loanValidationMessage || loanExtraValidationMessage) : currentStep === 3 && (applicant.additionalDetails?.kycBureauConsent !== 'true' || creditScore === null || isCheckingCredit) ? 'Provide consent and wait for KYC and bureau verification to complete before continuing.' : currentStep === 4 && requiredDocumentsNotUploaded.length > 0 ? `Upload all required documents before continuing: ${requiredDocumentsNotUploaded.map(doc => doc.label).join(', ')}.` : '';
+  const continueDisabledReason = currentStep === 1 && (!applicant.fullName || !validName(applicant.fullName) || !applicant.dateOfBirth || !validPan(applicant.panNumber) || !validEmail(applicant.email) || (applicant.workEmail !== '' && !validEmail(applicant.workEmail)) || !/^[1-9][0-9]{5}$/.test(applicant.pincode) || !employment.employmentType || Number(employment.monthlyInHandSalary) <= 0 || (employment.employmentType === 'SALARIED' && (!employment.employerName.trim() || !employment.designation.trim())) || (applicant.additionalDetails?.coApplicantRequired === 'true' && (!applicant.additionalDetails?.coApplicantName?.trim() || (applicant.additionalDetails?.coApplicantPan && !validPan(applicant.additionalDetails.coApplicantPan)) || (applicant.additionalDetails?.coApplicantEmail && !validEmail(applicant.additionalDetails.coApplicantEmail))))) ? 'Complete required applicant, contact, employment, income and co-applicant fields first.' : currentStep === 2 && (loanValidationMessage || loanExtraValidationMessage) ? (loanValidationMessage || loanExtraValidationMessage) : currentStep === 3 && (applicant.additionalDetails?.kycBureauConsent !== 'true' || (creditMode === 'ONLINE' ? creditScore === null || isCheckingCredit : !/^[0-9]{3}$/.test(manualCreditScore) || Number(manualCreditScore) < 300 || Number(manualCreditScore) > 900)) ? (creditMode === 'ONLINE' ? 'Provide consent and complete the online bureau check before continuing.' : 'Provide consent and enter a valid self-reported score from 300 to 900.') : currentStep === 4 && requiredDocumentsNotUploaded.length > 0 ? `Upload all required documents before continuing: ${requiredDocumentsNotUploaded.map(doc => doc.label).join(', ')}.` : '';
   const missingFieldCount = [!applicant.fullName, !validPan(applicant.panNumber), !validEmail(applicant.email), (applicant.workEmail !== '' && !validEmail(applicant.workEmail)), !/^[1-9][0-9]{5}$/.test(applicant.pincode), !!loanValidationMessage, !!loanExtraValidationMessage].filter(Boolean).length;
 
   const handleSubmit = async () => {
@@ -738,7 +752,6 @@ function App() {
     link.download = `Loan-Application-Summary-${String(applicationNumber).replace(/[^A-Za-z0-9_-]/g, '-')}.pdf`;
     document.body.appendChild(link); link.click(); link.remove(); window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
-
   const uploadDocument = async (docType: DocumentType, file: File) => {
     if (!ALLOWED_FILE_TYPES.includes(file.type)) { setDocuments((prev) => ({ ...prev, [docType]: { ...prev[docType], status: 'UPLOAD_FAILED', error: `${file.name}: unsupported file type. Allowed formats: PDF, JPG, PNG.`, fileName: file.name } })); return; }
     if (file.size > MAX_FILE_SIZE) { setDocuments((prev) => ({ ...prev, [docType]: { ...prev[docType], status: 'UPLOAD_FAILED', error: `${file.name}: file exceeds 5 MB.`, fileName: file.name } })); return; }
@@ -813,7 +826,6 @@ function App() {
       setDocuments(prev => ({...prev, [docType]: {...prev[docType], status: payload.status, verificationRemarks: payload.verificationRemarks || null, error: null}}));
     } catch (error) { setValidationMessage(error instanceof Error ? error.message : 'Document review could not be saved.'); }
   };
-
   const handleRemoveDocument = async (docType: DocumentType) => {
     const item = documents[docType];
     if (!item?.id || !applicationId) return;
@@ -826,13 +838,11 @@ function App() {
       setSaveIndicator('Document removed');
     } catch (error) { setValidationMessage(error instanceof Error ? error.message : 'Document could not be removed.'); }
   };
-
   const handleCapturePhoto = (docType: DocumentType) => {
     const input = document.createElement('input'); input.type = 'file'; input.accept = 'image/*'; input.setAttribute('capture', 'environment');
     input.onchange = async event => { const file = (event.target as HTMLInputElement).files?.[0]; if (file) await uploadDocument(docType, file); };
     input.click();
   };
-
   const handleChooseFile = (docType: DocumentType) => {
     const input = document.createElement('input');
     input.type = 'file';
@@ -871,7 +881,6 @@ function App() {
       window.setTimeout(() => URL.revokeObjectURL(url), 60000);
     } catch (error) { setValidationMessage(error instanceof Error ? error.message : 'Document could not be opened.'); }
   };
-
   const handleNewApplication = () => {
     const activeDraft = applications.find(item => ['DRAFT','DOCUMENTS_PENDING','CREDIT_CHECK_COMPLETED'].includes(item.status) && item.loanType === newApplicationLoanType);
     if (session?.role === 'USER' && activeDraft) {
@@ -880,13 +889,13 @@ function App() {
       return;
     }
     setShowUserDashboard(false);
-    setApplicationId(null); setSubmittedApplication(null); setSaveIndicator(''); setStatus('DRAFT'); setCreditScore(null);
+    setStaffApplicationOpen(true);
+    setApplicationId(null); setSubmittedApplication(null); setSaveIndicator(''); setStatus('DRAFT'); setCreditScore(null); setManualCreditScore(''); setCreditMode('MANUAL');
     setApplicant({ ...initialApplicant, mobileNumber: session?.mobile || initialApplicant.mobileNumber });
     setEmployment(initialEmployment); setLoanDetails({ ...initialLoanDetails, loanType: newApplicationLoanType }); setDocuments(createInitialDocuments());
     setSelectedFiles(Object.fromEntries(Object.keys(createInitialDocuments()).map((key) => [key, ''])) as Record<DocumentType, string>);
     setCurrentStep(1); setHighestUnlockedStep(1); setValidationMessage('');
   };
-
   const setApplicantExtra = (key: string, value: string) => setApplicant(prev => ({ ...prev, additionalDetails: { ...(prev.additionalDetails || {}), [key]: value } }));
   const setEmploymentExtra = (key: string, value: string) => setEmployment(prev => ({ ...prev, additionalDetails: { ...(prev.additionalDetails || {}), [key]: value } }));
   const setLoanExtra = (key: string, value: string) => setLoanDetails(prev => ({ ...prev, additionalDetails: { ...(prev.additionalDetails || {}), [key]: value } }));
@@ -904,10 +913,9 @@ function App() {
     } catch (error) { setIfscMessages(prev => ({ ...prev, [fieldKey]: { text: error instanceof Error ? error.message : 'IFSC lookup failed.', error: true } })); }
   };
   const scheduleAutoSave = () => { if (session?.role !== 'USER') return; if (autoSaveTimerRef.current !== null) window.clearTimeout(autoSaveTimerRef.current); autoSaveTimerRef.current = window.setTimeout(() => { void handleSaveDraft(); }, 900); };
-
   const handleLogout = () => {
     const authSession = readStoredAuth();
-    if (authSession) demoFetch('/api/auth/logout', { method: 'POST', headers: buildAuthHeaders(authSession) }).catch(() => undefined);
+    if (authSession) fetch('/api/auth/logout', { method: 'POST', headers: buildAuthHeaders(authSession) }).catch(() => undefined);
     clearAuth();
     setSession(null);
   };
@@ -926,9 +934,9 @@ function App() {
         <nav className="nav">
           {session.role === 'ADMIN' ? (
             <>
-              <a className="active" href="#">Dashboard</a>
-              <a href="#" onClick={(event) => { event.preventDefault(); handleNewApplication(); }}>New Application</a>
-              <a href="#">Applications</a>
+              <a className="active" href="#" onClick={(event) => { event.preventDefault(); setStaffApplicationOpen(false); setShowUnderwriting(false); }}>Recent Applications</a>
+              <a href="#" onClick={(event) => { event.preventDefault(); setShowUnderwriting(false); handleNewApplication(); }}>+ New Application</a>
+              <a href="#" onClick={(event) => { event.preventDefault(); setStaffApplicationOpen(false); setShowUnderwriting(true); }}>Underwriting</a>
             </>
           ) : (
             <a className="active" href="#" onClick={(event) => { event.preventDefault(); handleNewApplication(); }}>Application</a>
@@ -950,7 +958,7 @@ function App() {
           {applications.length === 0 ? <p>No previous applications found.</p> : <div className="doc-list">{applications.map(row => <div className="doc-item" key={row.id} style={{display:'flex',justifyContent:'space-between',gap:12,alignItems:'center',padding:12,borderBottom:'1px solid #e3e8ef'}}><div><strong>{(row.loanType || 'Loan product not selected').replaceAll('_',' ')}</strong><div>{row.losNumber || `DRAFT-${row.id}`}</div><small>Status: {row.status.replaceAll('_',' ')} · Stage: {row.status === 'DRAFT' ? 'Applicant' : row.status === 'DOCUMENTS_PENDING' ? 'Documents' : row.status === 'CREDIT_CHECK_COMPLETED' ? 'Verification' : row.status === 'SUBMITTED' ? 'Under review' : row.status} · Owner: {row.status === 'DRAFT' ? 'Applicant' : 'Credit Operations'} · Next action: {row.status === 'DRAFT' ? 'Complete application' : row.status === 'DOCUMENTS_PENDING' ? 'Resolve document requirements' : row.status === 'SUBMITTED' ? 'Await decision' : 'Check verification status'}</small></div>{row.status !== 'SUBMITTED' && row.status !== 'APPROVED' && row.status !== 'REJECTED' && <button className="secondary" onClick={() => void handleOpenApplication(row.id)}>Resume</button>}</div>)}</div>}
           <div className="inline-actions"><label>Loan product<select value={newApplicationLoanType} onChange={e => setNewApplicationLoanType(e.target.value)}><option value="PERSONAL_LOAN">Personal Loan</option><option value="HOME_LOAN">Home Loan</option><option value="CAR_LOAN">Vehicle Loan</option><option value="EDUCATION_LOAN">Education Loan</option><option value="BUSINESS_LOAN">Business Loan</option><option value="LOAN_AGAINST_PROPERTY">Loan Against Property</option></select></label><button className="secondary" onClick={handleNewApplication}>Start new application</button></div>
         </section>}
-        <section className="hero" style={{display: showUserDashboard && session.role === 'USER' ? 'none' : undefined}}>
+        <section className="hero" style={{display: (showUserDashboard && session.role === 'USER') || (session.role === 'ADMIN' && !staffApplicationOpen) ? 'none' : undefined}}>
           <div>
             <h1>New Loan Application</h1>
             <p>Step {currentStep} of 5</p>{applicationId && <small>{status === 'SUBMITTED' ? `Application Number: ${submittedApplication?.losNumber || `APP-${applicationId}`}` : `Temporary ID: DRAFT-${applicationId}`}</small>}
@@ -966,15 +974,15 @@ function App() {
         </section>
 
         {!showUserDashboard && validationMessage && <div className={`validation-box ${validationMessage.startsWith('Upload all required documents') || validationMessage.startsWith('Please upload these required documents') ? 'document-validation-error' : ''}`} role="alert" style={{marginBottom:16}}>{validationMessage}</div>}
-
-        {session.role === 'ADMIN' && <section className="dashboard-grid">
+        {session.role === 'ADMIN' && showUnderwriting && <UnderwritingWorkspace session={session} />}
+        {session.role === 'ADMIN' && !showUnderwriting && <section className="dashboard-grid">
           <div className="card metric"><span>Total Applications</span><strong>{applications.length}</strong></div>
           <div className="card metric"><span>Draft Applications</span><strong>{applications.filter((item) => item.status === 'DRAFT').length}</strong></div>
           <div className="card metric"><span>Under Review</span><strong>{applications.filter((item) => item.status === 'UNDER_REVIEW').length}</strong></div>
           <div className="card metric"><span>Submitted Applications</span><strong>{applications.filter((item) => item.status === 'SUBMITTED').length}</strong></div>
         </section>}
 
-        <section className="card form-card" style={{display: (session.role === 'ADMIN' || !showUserDashboard) && currentStep === 1 ? undefined : 'none'}} onBlurCapture={scheduleAutoSave}>
+        <section className="card form-card" style={{display: (session.role === 'ADMIN' ? staffApplicationOpen : !showUserDashboard) && currentStep === 1 ? undefined : 'none'}} onBlurCapture={scheduleAutoSave}>
           <h2>Applicant Details</h2>
           <div className="field-grid">
             <label>Full Name <span className="required-asterisk">*</span><input value={applicant.fullName} onChange={(e) => setApplicant({ ...applicant, fullName: e.target.value.replace(/[^A-Za-z .'-]/g, '') })} onBlur={(e) => { if (e.target.value && !validName(e.target.value)) setValidationMessage("Name should contain letters only."); }} />{applicant.fullName && !validName(applicant.fullName) && <small className="field-error">Name should contain letters only.</small>}</label>
@@ -1112,7 +1120,7 @@ function App() {
           </div>
         </section>
 
-        <section className="card form-card" style={{display: (session.role === 'ADMIN' || !showUserDashboard) && currentStep === 1 ? undefined : 'none'}} onBlurCapture={scheduleAutoSave}>
+        <section className="card form-card" style={{display: (session.role === 'ADMIN' ? staffApplicationOpen : !showUserDashboard) && currentStep === 1 ? undefined : 'none'}} onBlurCapture={scheduleAutoSave}>
           <h2>Employment & Income</h2>
           <div className="field-grid">
             <label>Employment Type <span className="required-asterisk">*</span>
@@ -1192,19 +1200,32 @@ function App() {
           </div>
         </section>
 
-        <section className="card form-card" style={{display: (session.role === 'ADMIN' || !showUserDashboard) && currentStep === 3 ? undefined : 'none'}} onBlurCapture={scheduleAutoSave}>
+        <section className="card form-card" style={{display: (session.role === 'ADMIN' ? staffApplicationOpen : !showUserDashboard) && currentStep === 3 ? undefined : 'none'}} onBlurCapture={scheduleAutoSave}>
           <h2>Credit Score</h2>
-          <div className="score-box">
-            <div>
-              <span className="label">Credit Score</span>
-              <strong>{creditScore ?? '—'}</strong>
+          <p className="credit-temp-id">Temporary Application ID: <strong>{applicationId ? `DRAFT-${applicationId}` : 'Creating draft…'}</strong></p>
+          <div className="credit-mode-toggle" role="group" aria-label="Credit score entry mode">
+            <button type="button" className={creditMode === 'MANUAL' ? 'primary' : 'secondary'} aria-pressed={creditMode === 'MANUAL'} onClick={() => { setCreditMode('MANUAL'); setApplicantExtra('creditScoreMode', 'MANUAL'); setValidationMessage(''); }}>Enter Manually</button>
+            <button type="button" className={creditMode === 'ONLINE' ? 'primary' : 'secondary'} aria-pressed={creditMode === 'ONLINE'} onClick={() => { setCreditMode('ONLINE'); setApplicantExtra('creditScoreMode', 'ONLINE'); setValidationMessage(''); }}>Check Online</button>
             </div>
-            <div className="badge success">Status: GOOD</div>
-          </div>
-          <label className="inline-consent" style={{display:"flex",gap:8,alignItems:"center",margin:"12px 0"}}><input type="checkbox" checked={applicant.additionalDetails?.kycBureauConsent === 'true'} onChange={e => setApplicantExtra('kycBureauConsent', String(e.target.checked))} /><span>I consent to KYC verification and a credit bureau enquiry for assessing this loan application.</span></label><p className="subtitle">KYC and bureau verification start automatically after consent is given. Results will appear here when available.</p>{isCheckingCredit && <div className="verification-progress" role="status"><span className="spinner" /> Connecting to bureau and fetching KYC details…</div>}
+          {creditMode === 'MANUAL' ? <div className="credit-manual-field">
+            <label>Enter your credit score (300–900)
+              <input type="number" inputMode="numeric" min={300} max={900} step={1} value={manualCreditScore} onChange={e => { const v = e.target.value; setManualCreditScore(v); setApplicantExtra('selfReportedCreditScore', v); }} placeholder="e.g. 750" />
+            </label>
+            {manualCreditScore !== '' && (/^[0-9]{3}$/.test(manualCreditScore) && Number(manualCreditScore) >= 300 && Number(manualCreditScore) <= 900 ?
+              <p role="status"><strong>{Number(manualCreditScore) >= 750 ? 'Excellent' : Number(manualCreditScore) >= 700 ? 'Good' : Number(manualCreditScore) >= 650 ? 'Fair' : 'Poor'}</strong> — Self-reported score (not bureau verified).</p>
+              : <p className="field-error" role="alert">Enter a whole number between 300 and 900.</p>)}
+            <p className="subtitle">This is only an indicative classification. Manual entry does not perform a bureau check or verify eligibility.</p>
+          </div> : <div className="credit-online-field">
+            <div className="score-box"><div><span className="label">Bureau Credit Score</span><strong>{creditScore ?? '—'}</strong></div>{creditScore !== null && <span className="badge success">{creditScore >= 750 ? 'Excellent' : creditScore >= 700 ? 'Good' : creditScore >= 650 ? 'Fair' : 'Poor'}</span>}</div>
+            <button type="button" className="primary" disabled={isCheckingCredit || applicant.additionalDetails?.kycBureauConsent !== 'true'} onClick={() => void handleRunCreditCheck()}>{isCheckingCredit ? 'Checking…' : 'Fetch Credit Score from Bureau'}</button>
+            <p className="subtitle">The online check starts only when you click this button after granting consent. Availability depends on the configured bureau provider.</p>
+            {isCheckingCredit && <div className="verification-progress" role="status"><span className="spinner" /> Connecting to KYC and bureau provider…</div>}
+          </div>}
+          <label className="credit-consent-row"><input type="checkbox" checked={applicant.additionalDetails?.kycBureauConsent === 'true'} onChange={e => { setApplicantExtra('kycBureauConsent', String(e.target.checked)); setValidationMessage(e.target.checked ? 'Consent selected. You can now continue with the selected score method.' : 'Consent removed. Online credit checks are disabled.'); }} /><span>I consent to KYC verification and a credit bureau enquiry for assessing this loan application.</span></label>
+          <p className="subtitle">Consent is required for the loan application. Selecting it alone does not fetch a bureau score.</p>
         </section>
 
-        <section className="card form-card" style={{display: (session.role === 'ADMIN' || !showUserDashboard) && currentStep === 3 ? undefined : 'none'}} onBlurCapture={scheduleAutoSave}>
+        <section className="card form-card" style={{display: (session.role === 'ADMIN' ? staffApplicationOpen : !showUserDashboard) && currentStep === 3 ? undefined : 'none'}} onBlurCapture={scheduleAutoSave}>
           <h2>KYC Verification</h2>
           <div className="field-grid">
             <label>Customer
@@ -1245,7 +1266,7 @@ function App() {
           {kycMessage && <p style={{ margin: '12px 0 0', color: '#324a6e' }}>{kycMessage}</p>}
         </section>
 
-        <section className="card form-card" style={{display: (session.role === 'ADMIN' || !showUserDashboard) && currentStep === 2 ? undefined : 'none'}} onBlurCapture={scheduleAutoSave}>
+        <section className="card form-card" style={{display: (session.role === 'ADMIN' ? staffApplicationOpen : !showUserDashboard) && currentStep === 2 ? undefined : 'none'}} onBlurCapture={scheduleAutoSave}>
           <h2>Loan Details</h2>
           <div className="field-grid">
             <label>Loan Type
@@ -1258,17 +1279,27 @@ function App() {
                 <option value="LOAN_AGAINST_PROPERTY">Loan Against Property</option>
               </select>
             </label>
-            <label>Requested Loan Amount <span className="required-asterisk">*</span><input type="number" min="1" step="1000" value={loanDetails.requestedLoanAmount} onChange={(e) => setLoanDetails({ ...loanDetails, requestedLoanAmount: e.target.value })} /></label>
-            <label>Preferred Tenure <span className="required-asterisk">*</span><input type="number" min="1" step="1" value={loanDetails.preferredTenure} onChange={(e) => setLoanDetails({ ...loanDetails, preferredTenure: e.target.value })} /></label>
-            <label>Interest Rate (%)<input type="number" min="0" max={MAX_INTEREST_RATE} step="0.01" value={loanDetails.interestRate} readOnly aria-readonly="true" title="Interest rate is set by the configured loan pricing policy." /></label>
+            <label>Requested Loan Amount <span className="required-asterisk">*</span>
+              <input inputMode="numeric" value={loanDetails.requestedLoanAmount === '' ? '' : formatCurrency(loanDetails.requestedLoanAmount)} onChange={(e) => setLoanDetails({ ...loanDetails, requestedLoanAmount: e.target.value.replace(/[^0-9]/g, '') })} aria-label="Requested loan amount in rupees" />
+              <span className="subtitle">{pricingPolicy.minAmount && pricingPolicy.maxAmount ? `Allowed: ${formatCurrency(pricingPolicy.minAmount)} to ${formatCurrency(pricingPolicy.maxAmount)}` : 'Amount limits are set by the product policy.'}</span>
+              <span className="inline-actions" style={{marginTop:6}}>{[100000,300000,500000].filter(amount => (!pricingPolicy.minAmount || amount >= pricingPolicy.minAmount) && (!pricingPolicy.maxAmount || amount <= pricingPolicy.maxAmount)).map(amount => <button type="button" className="secondary" key={amount} onClick={() => setLoanDetails({...loanDetails, requestedLoanAmount: amount})}>{formatCurrency(amount)}</button>)}</span>
+              {pricingPolicy.minAmount && pricingPolicy.maxAmount && <input type="range" min={pricingPolicy.minAmount} max={pricingPolicy.maxAmount} step={["HOME_LOAN", "CAR_LOAN", "VEHICLE_LOAN", "LOAN_AGAINST_PROPERTY"].includes(loanDetails.loanType) ? 10000 : 1000} value={Math.min(pricingPolicy.maxAmount, Math.max(pricingPolicy.minAmount, Number(loanDetails.requestedLoanAmount) || pricingPolicy.minAmount))} onChange={e => setLoanDetails({...loanDetails, requestedLoanAmount: Number(e.target.value)})} aria-label="Adjust loan amount" />}
+            </label>
+            <label>Preferred Tenure <span className="required-asterisk">*</span><select value={loanDetails.preferredTenure} onChange={e => setLoanDetails({...loanDetails, preferredTenure: Number(e.target.value)})}>{[6,12,18,24,36,48,60,84,120,180,240,300,360].filter(months => (!pricingPolicy.minTenure || months >= pricingPolicy.minTenure) && (!pricingPolicy.maxTenure || months <= pricingPolicy.maxTenure)).map(months => <option key={months} value={months}>{months} months ({(months/12).toFixed(1)} years)</option>)}</select></label>
+            <label>Your rate (% p.a.) <input value={formatInterestRate(loanDetails.interestRate)} readOnly aria-readonly="true" title="Calculated from the product rate card and applicable credit policy. Rate exceptions require approval." /></label>
             <label>Purpose of Loan<select value={(['Marriage','Illness','Higher Education','Home Purchase','Business','Vehicle Purchase','Debt Consolidation','Other'].includes(loanDetails.purposeOfLoan) ? loanDetails.purposeOfLoan : loanDetails.purposeOfLoan ? 'Other' : '')} onChange={e => setLoanDetails({...loanDetails, purposeOfLoan: e.target.value === 'Other' ? '' : e.target.value})}><option value="">Select purpose</option><option>Marriage</option><option>Illness</option><option>Higher Education</option><option>Home Purchase</option><option>Business</option><option>Vehicle Purchase</option><option>Debt Consolidation</option><option>Other</option></select></label><label>Purpose remark / Other purpose (optional)<input value={loanDetails.purposeOfLoan} placeholder="Describe the purpose if not listed" onChange={e => setLoanDetails({...loanDetails, purposeOfLoan: e.target.value})} /></label>
-            <label>Net Disbursal (₹)<input readOnly value={formatCurrency(Math.max(0, Number(loanDetails.requestedLoanAmount || 0) - Number(loanDetails.additionalDetails?.processingFees || 0) - Number(loanDetails.additionalDetails?.gstOnFees || 0) - Number(loanDetails.additionalDetails?.insuranceCharges || 0)))} /></label>
-            <details className="full-width"><summary>Fees and scheduled disbursal</summary><div className="field-grid">
-            <label>Processing Fees (₹)<input type="number" min="0" value={loanDetails.additionalDetails?.processingFees || '0'} onChange={e => setLoanExtra('processingFees', e.target.value)} /></label>
-            <label>GST on Fees (₹)<input type="number" min="0" value={loanDetails.additionalDetails?.gstOnFees || '0'} onChange={e => setLoanExtra('gstOnFees', e.target.value)} /></label>
-            <label>Insurance Charges (₹)<input type="number" min="0" value={loanDetails.additionalDetails?.insuranceCharges || '0'} onChange={e => setLoanExtra('insuranceCharges', e.target.value)} /></label>
+            <label>Net disbursal (₹)<input readOnly value={formatCurrency(calculatedFees.net)} /></label>
+            <label>Rate type<input readOnly value={pricingPolicy.rateType === 'FIXED' ? 'Fixed' : 'Reducing balance'} /></label>
+            <div className="full-width card" style={{padding:16}}>
+              <h3>Fees and net disbursal</h3>
+              <p>Processing fee ({pricingPolicy.processingFeePercent ?? 0}%): <strong>{formatCurrency(calculatedFees.processing)}</strong></p>
+              <p>GST on processing fee ({pricingPolicy.gstPercent ?? 0}%): <strong>{formatCurrency(calculatedFees.gst)}</strong></p>
+              <p>Insurance premium (if applicable): <strong>{formatCurrency(calculatedFees.insurance)}</strong></p>
+              <p>Total fees and charges: <strong>{formatCurrency(calculatedFees.total)}</strong></p>
+              <p>Net disbursal (upfront deductions): <strong>{formatCurrency(calculatedFees.net)}</strong></p>
+              <p className="subtitle">Charges are determined by the approved product configuration, not editable by applicants or frontline staff.</p>
+            </div>
             <label>Scheduled Disbursal Date<input type="date" min={new Date().toISOString().slice(0,10)} value={loanDetails.additionalDetails?.scheduledDisbursalDate || ''} onChange={e => setLoanExtra('scheduledDisbursalDate', e.target.value)} /></label>
-            </div></details>
           </div>
 
           {loanValidationMessage && (
@@ -1278,6 +1309,7 @@ function App() {
           {emiSummary && (
             <div className="emi-box" style={{ marginTop: 18 }}>
               <h3>EMI Calculation</h3>
+              <p className="subtitle">Key Fact Statement preview: annual percentage rate (APR) must be calculated and confirmed by the lender before offer acceptance; nominal interest is not APR.</p>
               <div className="emi-grid">
                 <div><span>Principal Amount</span><strong>{formatCurrency(emiSummary.principal)}</strong></div>
                 <div><span>Interest Rate</span><strong>{formatInterestRate(emiSummary.interestRate)}</strong></div>
@@ -1286,12 +1318,19 @@ function App() {
                 <div><span>Total Interest</span><strong>{formatCurrency(Math.round(emiSummary.totalInterest))}</strong></div>
                 <div><span>Total Amount Payable</span><strong>{formatCurrency(Math.round(emiSummary.totalPayable))}</strong></div>
               </div>
+              <div style={{marginTop:14}}>
+                <div style={{display:'flex',height:12,borderRadius:8,overflow:'hidden'}} aria-label="Principal and interest breakdown"><div style={{width:`${100*emiSummary.principal/emiSummary.totalPayable}%`,background:'#2d70b7'}}/><div style={{flex:1,background:'#e9a344'}}/></div>
+                <p className="subtitle">Principal {formatCurrency(emiSummary.principal)} · Interest {formatCurrency(Math.round(emiSummary.totalInterest))}</p>
+                <p className="subtitle">Fees: processing {formatCurrency(calculatedFees.processing)}, GST {formatCurrency(calculatedFees.gst)}, insurance {formatCurrency(calculatedFees.insurance)}</p>
+                <button type="button" className="secondary" onClick={() => setShowRepaymentSchedule(!showRepaymentSchedule)}>{showRepaymentSchedule ? 'Hide' : 'View'} repayment schedule</button>
+                {showRepaymentSchedule && <div style={{maxHeight:300,overflow:'auto',marginTop:12}}><table style={{width:'100%'}}><thead><tr><th>Month</th><th>Principal</th><th>Interest</th><th>Balance</th></tr></thead><tbody>{(() => { let balance = emiSummary.principal; const monthlyRate = emiSummary.interestRate / 1200; return Array.from({length:emiSummary.tenure}, (_,i) => { const interest = balance*monthlyRate; const principal = Math.min(balance, Math.max(0, emiSummary.monthlyEmi-interest)); balance = Math.max(0,balance-principal); return <tr key={i}><td>{i+1}</td><td>{formatCurrency(Math.round(principal))}</td><td>{formatCurrency(Math.round(interest))}</td><td>{formatCurrency(Math.round(balance))}</td></tr>; }); })()}</tbody></table></div>}
+              </div>
             </div>
           )}
 
         </section>
 
-        <section className="card form-card" style={{display: (session.role === 'ADMIN' || !showUserDashboard) && currentStep === 4 ? undefined : 'none'}} onBlurCapture={scheduleAutoSave}>
+        <section className="card form-card" style={{display: (session.role === 'ADMIN' ? staffApplicationOpen : !showUserDashboard) && currentStep === 4 ? undefined : 'none'}} onBlurCapture={scheduleAutoSave}>
           <h2>Document Upload</h2>
           <p className="subtitle">Allowed formats: PDF, JPG, PNG. Maximum size: 5 MB per file.</p>
 
@@ -1355,9 +1394,9 @@ function App() {
                       </>
                     ) : (
                       <>
-                        <button className="primary" onClick={() => handleChooseFile(doc.key)} disabled={item.status === 'UPLOADING' || isCreatingApplication}>
-                          {item.status === 'UPLOADING' ? 'Uploading...' : 'Choose File'}
-                        </button>
+                      <button className="primary" onClick={() => handleChooseFile(doc.key)} disabled={item.status === 'UPLOADING' || isCreatingApplication}>
+                        {item.status === 'UPLOADING' ? 'Uploading...' : 'Choose File'}
+                      </button>
                         {doc.key === 'PHOTOGRAPH' && <button className="secondary" onClick={() => handleCapturePhoto(doc.key)}>Camera</button>}
                       </>
                     )}
@@ -1373,9 +1412,8 @@ function App() {
           </div>
         </section>
 
-        {!showUserDashboard && currentStep === 5 && <section className="card form-card"><h2>Review & Submit</h2><p>Review your details before final submission. You can go back to correct any information.</p><div className="field-grid"><div><strong>Applicant</strong><p>{applicant.fullName}</p></div><div><strong>PAN</strong><p>{applicant.panNumber}</p></div><div><strong>Loan type</strong><p>{loanDetails.loanType.replaceAll('_',' ')}</p></div><div><strong>Requested amount</strong><p>{formatCurrency(loanDetails.requestedLoanAmount)}</p></div><div><strong>Tenure</strong><p>{loanDetails.preferredTenure} months</p></div><div><strong>EMI</strong><p>{emiSummary ? formatCurrency(Math.round(emiSummary.monthlyEmi)) : '—'}</p></div><div><strong>Missing required fields</strong><p>{missingFieldCount}</p></div><div><strong>Required documents missing</strong><p>{requiredDocumentsNotUploaded.length}</p></div></div><label className="review-declaration"><input type="checkbox" onChange={e => setLoanExtra('declarationAccepted', String(e.target.checked))} checked={loanDetails.additionalDetails?.declarationAccepted === 'true'} /> I declare that the information provided is accurate and consent to the applicable verification checks.</label><div className="inline-actions"><button className="secondary" onClick={() => setCurrentStep(1)}>Edit Applicant</button><button className="secondary" onClick={() => setCurrentStep(2)}>Edit Loan</button><button className="primary" onClick={handleSubmit}>Confirm & Submit</button></div></section>}
-
-        {!showUserDashboard && submittedApplication && (
+        {(session.role === 'ADMIN' ? staffApplicationOpen : !showUserDashboard) && currentStep === 5 && <section className="card form-card"><h2>Review & Submit</h2><p>Review your details before final submission. You can go back to correct any information.</p><div className="field-grid"><div><strong>Applicant</strong><p>{applicant.fullName}</p></div><div><strong>PAN</strong><p>{applicant.panNumber}</p></div><div><strong>Loan type</strong><p>{loanDetails.loanType.replaceAll('_',' ')}</p></div><div><strong>Requested amount</strong><p>{formatCurrency(loanDetails.requestedLoanAmount)}</p></div><div><strong>Tenure</strong><p>{loanDetails.preferredTenure} months</p></div><div><strong>EMI</strong><p>{emiSummary ? formatCurrency(Math.round(emiSummary.monthlyEmi)) : '—'}</p></div><div><strong>Missing required fields</strong><p>{missingFieldCount}</p></div><div><strong>Required documents missing</strong><p>{requiredDocumentsNotUploaded.length}</p></div></div><label className="review-declaration"><input type="checkbox" onChange={e => setLoanExtra('declarationAccepted', String(e.target.checked))} checked={loanDetails.additionalDetails?.declarationAccepted === 'true'} /> I declare that the information provided is accurate and consent to the applicable verification checks.</label><div className="inline-actions"><button className="secondary" onClick={() => setCurrentStep(1)}>Edit Applicant</button><button className="secondary" onClick={() => setCurrentStep(2)}>Edit Loan</button><button className="primary" onClick={handleSubmit}>Confirm & Submit</button></div></section>}
+        {(session.role === 'ADMIN' ? staffApplicationOpen : !showUserDashboard) && submittedApplication && (
           <section className="card success-card">
             <h2>Application Submitted Successfully</h2>
             <div className="meta-row"><span>Application Number</span><strong>{submittedApplication.losNumber}</strong></div>
@@ -1385,17 +1423,16 @@ function App() {
           </section>
         )}
 
-        {session.role === 'USER' && !showUserDashboard && !submittedApplication && <div className="inline-actions" style={{position:'sticky',bottom:0,background:'var(--surface, #fff)',padding:'12px 0',zIndex:5}}><button className="secondary" disabled={currentStep === 1} onClick={() => setCurrentStep(s => Math.max(1,s-1))}>Back</button><button className="secondary" onClick={handleSaveDraft} disabled={isCreatingApplication}>Save Draft</button><button className="primary" disabled={Boolean(continueDisabledReason)} title={continueDisabledReason || undefined} onClick={() => { if (currentStep === 1) { const errors = [!applicant.fullName && 'Full name is required', !validPan(applicant.panNumber) && 'PAN should look like ABCDE1234F', !validEmail(applicant.email) && 'Enter a valid email address', !/^[1-9][0-9]{5}$/.test(applicant.pincode) && 'Enter a valid 6-digit PIN code'].filter(Boolean); if (errors.length) { setValidationMessage(errors.join('. ')); return; } } if (currentStep === 2 && (loanValidationMessage || loanExtraValidationMessage)) { setValidationMessage(loanValidationMessage || loanExtraValidationMessage); return; } if (currentStep === 4 && requiredDocumentsNotUploaded.length > 0) { setValidationMessage(`Upload all required documents before continuing: ${requiredDocumentsNotUploaded.map(doc => doc.label).join(', ')}.`); return; } if (currentStep < 5) { setHighestUnlockedStep(s => Math.max(s, currentStep + 1)); setCurrentStep(s => s+1); setValidationMessage(''); } else void handleSubmit(); }}>{currentStep === 5 ? 'Submit Application' : 'Continue'}</button><span style={{alignSelf:'center',fontSize:12,color:'#64748b'}}>Step {currentStep} of 5 · {saveIndicator || (applicationId ? 'Saved draft' : 'Not saved yet')}{continueDisabledReason ? ` · ${continueDisabledReason}` : ''}</span></div>}
-
-        {session.role === 'ADMIN' && (
+        {(session.role === 'USER' ? !showUserDashboard : staffApplicationOpen) && !submittedApplication && <div className="inline-actions" style={{position:'sticky',bottom:0,background:'var(--surface, #fff)',padding:'12px 0',zIndex:5}}><button className="secondary" disabled={currentStep === 1} onClick={() => setCurrentStep(s => Math.max(1,s-1))}>Back</button><button className="secondary" onClick={handleSaveDraft} disabled={isCreatingApplication}>Save Draft</button><button className="primary" disabled={Boolean(continueDisabledReason)} title={continueDisabledReason || undefined} onClick={() => { if (currentStep === 1) { const errors = [!applicant.fullName && 'Full name is required', !validPan(applicant.panNumber) && 'PAN should look like ABCDE1234F', !validEmail(applicant.email) && 'Enter a valid email address', !/^[1-9][0-9]{5}$/.test(applicant.pincode) && 'Enter a valid 6-digit PIN code'].filter(Boolean); if (errors.length) { setValidationMessage(errors.join('. ')); return; } } if (currentStep === 2 && (loanValidationMessage || loanExtraValidationMessage)) { setValidationMessage(loanValidationMessage || loanExtraValidationMessage); return; } if (currentStep === 4 && requiredDocumentsNotUploaded.length > 0) { setValidationMessage(`Upload all required documents before continuing: ${requiredDocumentsNotUploaded.map(doc => doc.label).join(', ')}.`); return; } if (currentStep < 5) { setHighestUnlockedStep(s => Math.max(s, currentStep + 1)); setCurrentStep(s => s+1); setValidationMessage(''); } else void handleSubmit(); }}>{currentStep === 5 ? 'Submit Application' : 'Continue'}</button><span style={{alignSelf:'center',fontSize:12,color:'#64748b'}}>Step {currentStep} of 5 · {saveIndicator || (applicationId ? 'Saved draft' : 'Not saved yet')}{continueDisabledReason ? ` · ${continueDisabledReason}` : ''}</span></div>}
+        {session.role === 'ADMIN' && !staffApplicationOpen && !showUnderwriting && (
           <section className="card table-card">
-            <h2>Recent Applications</h2>
+            <div className="inline-actions" style={{justifyContent:"space-between",alignItems:"center"}}><h2>Recent Applications</h2><button type="button" className="primary" onClick={handleNewApplication}>+ New Application</button></div>
             <div className="toolbar">
               <input placeholder="Search name, application number, or mobile" value={search} onChange={(e) => setSearch(e.target.value)} />
               <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
                 <option value="ALL">All Status</option>
                 <option value="DRAFT">Draft</option>
-                <option value="SUBMITTED">Submitted</option><option value="UNDER_REVIEW">Under review</option><option value="APPROVED">Approved</option><option value="REJECTED">Rejected</option>
+                <option value="SUBMITTED">Submitted</option>
               </select>
             </div>
             <table>
@@ -1403,8 +1440,9 @@ function App() {
                 <tr>
                   <th>Application Number</th>
                   <th>Applicant Name</th>
+                  <th>Co-applicant</th>
                   <th>Loan Type</th>
-                  <th>Requested Amount</th>
+                  <th>Requested / Sanctioned</th>
                   <th>Credit Score</th>
                   <th>Status</th>
                   <th>Stage</th>
@@ -1419,15 +1457,16 @@ function App() {
                   <tr key={row.id}>
                     <td>{row.losNumber ?? `DRAFT-${row.id}`}</td>
                     <td>{row.applicantName || 'Details pending'}</td>
-                    <td>{row.loanType || 'Not selected'}</td>
+                    <td>—</td>
+                    <td>{(row.loanType || 'Not selected').replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, char => char.toUpperCase())}</td>
                     <td>₹{row.requestedAmount ? row.requestedAmount.toLocaleString('en-IN') : '0'}</td>
                     <td>{row.creditScore ?? '—'}</td>
-                    <td><span className={`badge ${statusColors[row.status] ?? 'neutral'}`}>{row.status}</span></td>
+                    <td><span className={`badge ${statusColors[row.status] ?? 'neutral'}`}>{({DRAFT:'Draft',SUBMITTED:'Submitted',UNDER_REVIEW:'In review',DOCUMENTS_PENDING:'Action needed',CREDIT_CHECK_COMPLETED:'In review',APPROVED:'Approved',REJECTED:'Not approved'} as Record<string,string>)[row.status] || row.status.replace(/_/g, ' ')}</span></td>
                     <td>{row.status === 'DRAFT' ? 'Applicant details' : row.status === 'DOCUMENTS_PENDING' ? 'Documents' : row.status === 'CREDIT_CHECK_COMPLETED' ? 'Verification' : row.status === 'SUBMITTED' || row.status === 'UNDER_REVIEW' ? 'Underwriting' : row.status}</td>
                     <td>{row.status === 'DRAFT' ? 'Applicant' : 'Credit Operations'}</td>
                     <td>{row.status === 'DRAFT' ? 'Complete application' : row.status === 'DOCUMENTS_PENDING' ? 'Upload pending documents' : row.status === 'SUBMITTED' ? 'Review submission' : 'Review verification'}</td>
                     <td>{new Date(row.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</td>
-                    <td><button className="secondary" onClick={() => handleOpenApplication(row.id)}>Open</button>{['SUBMITTED','UNDER_REVIEW','APPROVED','REJECTED'].includes(row.status) && <div style={{display:'flex',gap:4,marginTop:5}}><button className="secondary" onClick={() => void handleDemoDecision(row.id,'APPROVED')}>Approve</button><button className="secondary" onClick={() => void handleDemoDecision(row.id,'REJECTED')}>Reject</button><button className="secondary" onClick={() => void handleDemoDecision(row.id,'UNDER_REVIEW')}>In review</button></div>}</td>
+                    <td><button className="secondary" onClick={() => handleOpenApplication(row.id)}>Open</button></td>
                   </tr>
                 ))}
               </tbody>
