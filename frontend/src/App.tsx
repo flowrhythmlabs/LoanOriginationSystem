@@ -592,18 +592,6 @@ function App() {
     try {
       const mobileError = validateMobileNumber(applicant.mobileNumber);
       if (mobileError) throw new Error(mobileError);
-      if (applicant.additionalDetails?.kycBureauConsent !== 'true') {
-        setValidationMessage('Please provide consent before submitting the application.');
-        return;
-      }
-      if (creditMode === 'MANUAL' && (!/^[0-9]{3}$/.test(manualCreditScore) || Number(manualCreditScore) < 300 || Number(manualCreditScore) > 900)) {
-        setValidationMessage('Enter a valid self-reported credit score between 300 and 900.');
-        return;
-      }
-      if (creditMode === 'ONLINE' && creditScore === null) {
-        setValidationMessage('Complete the online bureau credit check before submitting.');
-        return;
-      }
       const id = await ensureApplication();
       const saveResponse = await apiFetch(`/api/applications/${id}`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
