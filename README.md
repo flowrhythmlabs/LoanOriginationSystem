@@ -23,7 +23,7 @@ The frontend is a single-page application. Its progress indicator labels five st
 ### Current integration gaps
 
 - The **Run Credit Check** action now saves the current form and calls the application-specific backend credit-check endpoint, which persists the simulated result required for submission. The result is still mock data, not a live bureau result.
-- The latest saved draft for a signed-in user is automatically reopened after login. Backend application listing is filtered to the signed-in user’s mobile number.
+- The latest saved draft for a signed-in user is automatically reopened after login. Backend application listing is filtered to the signed-in userï¿½s mobile number.
 - The KYC mode selector shown in the form is included in a frontend request, but the KYC controller does not forward that value to the provider. The effective mock mode comes from backend configuration/provider behavior.
 - The application-summary download button has no download action. There are no UI actions to approve or reject an application.
 
@@ -68,11 +68,41 @@ USER_MANUAL.md          Non-technical end-user guide
 - Java 17
 - Maven installed and available as `mvn` in the terminal
 - Node.js 18 or newer and npm
+- PostgreSQL 14 or newer (the backend no longer uses H2 by default)
 - Git, if cloning the repository
 
-Check the tools with `java -version`, `mvn -version`, `node --version`, and `npm --version`.
+Check the tools with `java -version`, `mvn -version`, `node --version`, `npm --version`, and `psql --version`.
 
 ## 6. Install and Build
+
+### 6.1 Create the database and staff accounts (first-time setup)
+
+1. Create the database (the default name is `finedge`):
+
+   ```bash
+   psql -U postgres -c "CREATE DATABASE finedge;"
+   ```
+
+2. Tell the backend how to connect. Defaults are `jdbc:postgresql://localhost:5432/finedge`, user `finedge`, password `postgres`; override them if your server differs (PowerShell example):
+
+   ```powershell
+   $env:DB_USERNAME = "postgres"
+   $env:DB_PASSWORD = "<your postgres password>"
+   ```
+
+3. Start the backend once (section 7) so Hibernate creates the applicant and loan tables, then stop it.
+4. Create the staff, underwriting and maker-checker tables, then load the demo staff accounts (demo only, never in production):
+
+   ```bash
+   psql -U postgres -d finedge -f backend/ADMIN_PORTAL_SCHEMA.sql
+   psql -U postgres -d finedge -f backend/DEMO_STAFF_SEED.sql
+   ```
+
+   The seed creates `superadmin`, `policyadmin`, `processor`, `underwriter`, `creditmanager`, `operations` and `auditor`, all with password `admin`. Staff sign in at `/staff/login` with the password and then a 6-digit authenticator code. Add each account's Base32 secret (`staff_account.totp_secret_encrypted`, listed in `backend/DEMO_STAFF_SEED.sql`) to Google or Microsoft Authenticator as a time-based entry. See [DEMO_STAFF_SETUP.md](DEMO_STAFF_SETUP.md). Re-running the seed resets passwords and MFA secrets.
+
+   If staff login shows "Internal server error", these tables are missing; run step 4.
+
+### 6.2 Install and build
 
 From the repository root, install frontend dependencies and build the frontend:
 
@@ -92,7 +122,7 @@ mvn package
 
 ## 7. Run the Application
 
-Run each process in a separate terminal. Start Maven from `backend` so the default relative H2 and document paths resolve beneath `backend/data/`.
+Run each process in a separate terminal. Start Maven from `backend` so the default relative document path resolves beneath `backend/data/`. PostgreSQL must be running and the `DB_*` variables set as in section 6.1.
 
 Backend:
 
@@ -117,9 +147,11 @@ Vite uses port `5173` by default and proxies `/api` requests to `http://localhos
 
 The login page calls the backend authentication endpoints. Successful login receives an opaque bearer token stored for the current browser session. Protected API requests send `Authorization: Bearer <token>`; caller-supplied `X-Role`, `X-Mobile`, and `X-Username` headers are no longer trusted. Tokens expire after the configured session lifetime and logout revokes the token on the server.
 
-**Development OTP:** `LOS_DEMO_OTP_ENABLED` defaults to `true` for local development. The backend generates a random six-digit OTP, stores it with a short expiry and attempt limit, and returns it to the UI for development testing. This is not SMS delivery. Set `LOS_DEMO_OTP_ENABLED=false` in production; a real SMS OTP provider must be integrated before user login can be used in production.
+**SMS OTP:** user login sends a six-digit OTP by SMS through 2Factor (`SmsOtpSender`). Set the key with `SMS_API_KEY` (or `providers.sms.api-key` in `application.yml`); optionally set `SMS_TEMPLATE_ID`. Use your own key and do not commit real keys to a public repository. `LOS_DEMO_OTP_ENABLED` defaults to `false`; set it to `true` only for local testing to have the OTP returned in the API response. The OTP expires after `LOS_OTP_MINUTES` (default 5).
 
-This branch does not use Netlify. There are no Netlify functions, `netlify.toml` or browser-side mock API; the frontend always calls the Spring Boot backend through the Vite `/api` proxy. Any SMS provider (for example 2Factor) must be configured on the backend through the `providers.sms.*` settings used by `SmsOtpSender`.
+**Staff login:** `/staff/login` uses the staff accounts seeded in section 6.1: password, then a TOTP code.
+
+This branch does not use Netlify. There are no Netlify functions, `netlify.toml` or browser-side mock API; the frontend always calls the Spring Boot backend through the Vite `/api` proxy.
 
 
 **Admin credentials:** `LOS_ADMIN_USERNAME` and `LOS_ADMIN_PASSWORD` configure the backend admin login. The defaults `admin` / `admin` are for local development only and must be overridden before deployment. Use a strong secret and a secret manager in production. MFA, persistent user management, password hashing/rotation, and enterprise identity integration remain production hardening items.
@@ -192,19 +224,18 @@ The entity defines these values:
 
 ## 12. Database and File Storage
 
-The default runtime database is file-backed H2:
+The default runtime database is PostgreSQL:
 
-- JDBC URL: `jdbc:h2:file:./data/losdb`
-- Database file: `backend/data/losdb.mv.db` when the backend is started from `backend/`
-- Schema setting: Hibernate `ddl-auto: update`
-- H2 console: `http://localhost:8080/h2-console` (local development only)
-- Default H2 console connection: JDBC URL above, username `sa`, blank password
+- JDBC URL: `jdbc:postgresql://localhost:5432/finedge` (override with `DB_URL`)
+- Credentials: `DB_USERNAME` / `DB_PASSWORD` (defaults `finedge` / `postgres`)
+- Applicant and loan tables: created by Hibernate (`ddl-auto: update`)
+- Staff, underwriting and maker-checker tables: `backend/ADMIN_PORTAL_SCHEMA.sql`; demo staff accounts: `backend/DEMO_STAFF_SEED.sql` (see section 6.1)
 
-The default database and uploaded document files survive backend restarts. The test profile uses an in-memory H2 database with `create-drop` and a test upload directory. H2 console and the default blank local database password are development settings, not production settings.
+The test profile uses an in-memory H2 database with `create-drop` and a test upload directory. Default credentials are development settings, not production settings.
 
 Persisted JPA data includes applicants, loan applications, employment details, loan details, credit checks, documents' metadata, and KYC verifications. Application rows reference their applicant, employment, loan, credit-check, and document records. The LOS number is stored on the application. Uploaded bytes are written to `backend/data/documents/` by default; only their metadata/path is in the database.
 
-To preserve local records, back up `backend/data/` while the backend is stopped. Deleting that directory resets the default local database and document store. If `DB_URL` or `DOCUMENT_STORAGE_PATH` is overridden, data is stored at the overridden locations instead.
+Back up the PostgreSQL database (`pg_dump finedge`) and `backend/data/documents/` to preserve local records. If `DOCUMENT_STORAGE_PATH` is overridden, documents are stored there instead.
 
 ## 13. Backend API Overview
 
@@ -245,10 +276,13 @@ Runtime settings are in [backend/src/main/resources/application.yml](backend/src
 
 | Environment variable | Default/use |
 | --- | --- |
-| `DB_URL` | `jdbc:h2:file:./data/losdb` |
-| `DB_DRIVER_CLASS_NAME` | `org.h2.Driver` |
-| `DB_USERNAME` | `sa` |
-| `DB_PASSWORD` | Blank |
+| `DB_URL` | `jdbc:postgresql://localhost:5432/finedge` |
+| `DB_DRIVER_CLASS_NAME` | `org.postgresql.Driver` |
+| `DB_USERNAME` | `finedge` |
+| `DB_PASSWORD` | `postgres` |
+| `SMS_API_KEY` | 2Factor API key for OTP SMS |
+| `SMS_TEMPLATE_ID` | Optional 2Factor template name |
+| `LOS_DEMO_OTP_ENABLED` | `false`; `true` returns the OTP in the API response (local testing only) |
 | `DOCUMENT_STORAGE_PATH` | `./data/documents` |
 | `LOAN_MAX_INTEREST_RATE` | `30` percent |
 | `MOCK_KYC_MODE` | `SUCCESS` |
@@ -279,6 +313,10 @@ Maven tests activate the `test` profile, which uses in-memory H2 and `backend/ta
 ### Maven is not recognized
 
 Run `mvn -version`. Install Maven and add its `bin` directory to `PATH`, or use a terminal where Maven is already configured. The repository does not include Maven Wrapper scripts.
+
+### Backend fails with a PostgreSQL error
+
+Make sure PostgreSQL is running, the `finedge` database exists, and `DB_USERNAME` / `DB_PASSWORD` are correct (section 6.1). Maven's `Process terminated with exit code: 1` usually means the database is missing or the credentials are wrong; see the first exception above that line.
 
 ### Backend does not start or reports the database is in use
 
