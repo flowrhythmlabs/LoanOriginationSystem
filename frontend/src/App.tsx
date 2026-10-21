@@ -1,7 +1,6 @@
 import { UnderwritingWorkspace } from './UnderwritingWorkspace';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { LoginPage } from './LoginPage';
-import { StaffLoginPage } from './StaffLoginPage';
 import { buildAuthHeaders, clearAuth, readStoredAuth, type AuthSession } from './auth';
 
 type Applicant = {
@@ -556,10 +555,11 @@ function App() {
     };
   }, [loanDetails.requestedLoanAmount, loanDetails.interestRate, loanDetails.preferredTenure, loanValidationMessage]);
 
-  const handleSaveDraft = async () => {
+  const handleSaveDraft = async (silent = false) => {
     try {
       const mobileError = validateMobileNumber(applicant.mobileNumber);
       if (mobileError) {
+        if (silent) return;
         setApplicantMobileError(mobileError);
         setValidationMessage(mobileError);
         return;
@@ -572,6 +572,7 @@ function App() {
       });
       const result = await response.json().catch(() => null);
       if (!response.ok) {
+        if (silent) return;
         throw new Error(describeApiError(result, 'Draft could not be saved.'));
       }
       setStatus(result?.status || status);
@@ -579,6 +580,7 @@ function App() {
       setValidationMessage('');
       await fetchApplications();
     } catch (error) {
+      if (silent) return;
       setValidationMessage(error instanceof Error ? error.message : 'Draft could not be saved.');
     }
   };
@@ -592,18 +594,6 @@ function App() {
     try {
       const mobileError = validateMobileNumber(applicant.mobileNumber);
       if (mobileError) throw new Error(mobileError);
-      if (applicant.additionalDetails?.kycBureauConsent !== 'true') {
-        setValidationMessage('Please provide consent before submitting the application.');
-        return;
-      }
-      if (creditMode === 'MANUAL' && (!/^[0-9]{3}$/.test(manualCreditScore) || Number(manualCreditScore) < 300 || Number(manualCreditScore) > 900)) {
-        setValidationMessage('Enter a valid self-reported credit score between 300 and 900.');
-        return;
-      }
-      if (creditMode === 'ONLINE' && creditScore === null) {
-        setValidationMessage('Complete the online bureau credit check before submitting.');
-        return;
-      }
       const id = await ensureApplication();
       const saveResponse = await apiFetch(`/api/applications/${id}`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
@@ -925,7 +915,7 @@ function App() {
       setIfscMessages(prev => ({ ...prev, [fieldKey]: { text: `${bank.BANK} · ${bank.BRANCH}`, error: false } }));
     } catch (error) { setIfscMessages(prev => ({ ...prev, [fieldKey]: { text: error instanceof Error ? error.message : 'IFSC lookup failed.', error: true } })); }
   };
-  const scheduleAutoSave = () => { if (session?.role !== 'USER') return; if (autoSaveTimerRef.current !== null) window.clearTimeout(autoSaveTimerRef.current); autoSaveTimerRef.current = window.setTimeout(() => { void handleSaveDraft(); }, 900); };
+  const scheduleAutoSave = () => { if (session?.role !== 'USER') return; if (autoSaveTimerRef.current !== null) window.clearTimeout(autoSaveTimerRef.current); autoSaveTimerRef.current = window.setTimeout(() => { void handleSaveDraft(true); }, 900); };
   const handleLogout = () => {
     const authSession = readStoredAuth();
     if (authSession) fetch('/api/auth/logout', { method: 'POST', headers: buildAuthHeaders(authSession) }).catch(() => undefined);
@@ -934,7 +924,7 @@ function App() {
   };
 
   if (!session) {
-    return window.location.pathname.startsWith('/staff') ? <StaffLoginPage onAuthenticated={setSession} /> : <LoginPage onAuthenticated={setSession} />;
+    return <LoginPage onAuthenticated={setSession} />;
   }
 
   return (
@@ -1420,7 +1410,7 @@ function App() {
           </div>
 
           <div className="inline-actions">
-            <button className="secondary" onClick={handleSaveDraft} disabled={isCreatingApplication}>Save Draft</button>
+            <button className="secondary" onClick={() => void handleSaveDraft()} disabled={isCreatingApplication}>Save Draft</button>
             <button className="primary" onClick={() => { if (requiredDocumentsNotUploaded.length) { setValidationMessage(`Upload all required documents before continuing: ${requiredDocumentsNotUploaded.map(doc => doc.label).join(', ')}.`); return; } setHighestUnlockedStep(s => Math.max(s, 5)); setCurrentStep(5); setValidationMessage(''); }}>Continue to Review</button>
           </div>
         </section>
@@ -1436,7 +1426,7 @@ function App() {
           </section>
         )}
 
-        {(session.role === 'USER' ? !showUserDashboard : staffApplicationOpen) && !submittedApplication && <div className="inline-actions" style={{position:'sticky',bottom:0,background:'var(--surface, #fff)',padding:'12px 0',zIndex:5}}><button className="secondary" disabled={currentStep === 1} onClick={() => setCurrentStep(s => Math.max(1,s-1))}>Back</button><button className="secondary" onClick={handleSaveDraft} disabled={isCreatingApplication}>Save Draft</button><button className="primary" disabled={Boolean(continueDisabledReason)} title={continueDisabledReason || undefined} onClick={() => { if (currentStep === 1) { const errors = [!applicant.fullName && 'Full name is required', !validPan(applicant.panNumber) && 'PAN should look like ABCDE1234F', !validEmail(applicant.email) && 'Enter a valid email address', !/^[1-9][0-9]{5}$/.test(applicant.pincode) && 'Enter a valid 6-digit PIN code'].filter(Boolean); if (errors.length) { setValidationMessage(errors.join('. ')); return; } } if (currentStep === 2 && (loanValidationMessage || loanExtraValidationMessage)) { setValidationMessage(loanValidationMessage || loanExtraValidationMessage); return; } if (currentStep === 4 && requiredDocumentsNotUploaded.length > 0) { setValidationMessage(`Upload all required documents before continuing: ${requiredDocumentsNotUploaded.map(doc => doc.label).join(', ')}.`); return; } if (currentStep < 5) { setHighestUnlockedStep(s => Math.max(s, currentStep + 1)); setCurrentStep(s => s+1); setValidationMessage(''); } else void handleSubmit(); }}>{currentStep === 5 ? 'Submit Application' : 'Continue'}</button><span style={{alignSelf:'center',fontSize:12,color:'#64748b'}}>Step {currentStep} of 5 · {saveIndicator || (applicationId ? 'Saved draft' : 'Not saved yet')}{continueDisabledReason ? ` · ${continueDisabledReason}` : ''}</span></div>}
+        {(session.role === 'USER' ? !showUserDashboard : staffApplicationOpen) && !submittedApplication && <div className="inline-actions" style={{position:'sticky',bottom:0,background:'var(--surface, #fff)',padding:'12px 0',zIndex:5}}><button className="secondary" disabled={currentStep === 1} onClick={() => setCurrentStep(s => Math.max(1,s-1))}>Back</button><button className="secondary" onClick={() => void handleSaveDraft()} disabled={isCreatingApplication}>Save Draft</button><button className="primary" disabled={Boolean(continueDisabledReason)} title={continueDisabledReason || undefined} onClick={() => { if (currentStep === 1) { const errors = [!applicant.fullName && 'Full name is required', !validPan(applicant.panNumber) && 'PAN should look like ABCDE1234F', !validEmail(applicant.email) && 'Enter a valid email address', !/^[1-9][0-9]{5}$/.test(applicant.pincode) && 'Enter a valid 6-digit PIN code'].filter(Boolean); if (errors.length) { setValidationMessage(errors.join('. ')); return; } } if (currentStep === 2 && (loanValidationMessage || loanExtraValidationMessage)) { setValidationMessage(loanValidationMessage || loanExtraValidationMessage); return; } if (currentStep === 4 && requiredDocumentsNotUploaded.length > 0) { setValidationMessage(`Upload all required documents before continuing: ${requiredDocumentsNotUploaded.map(doc => doc.label).join(', ')}.`); return; } if (currentStep < 5) { setHighestUnlockedStep(s => Math.max(s, currentStep + 1)); setCurrentStep(s => s+1); setValidationMessage(''); } else void handleSubmit(); }}>{currentStep === 5 ? 'Submit Application' : 'Continue'}</button><span style={{alignSelf:'center',fontSize:12,color:'#64748b'}}>Step {currentStep} of 5 · {saveIndicator || (applicationId ? 'Saved draft' : 'Not saved yet')}{continueDisabledReason ? ` · ${continueDisabledReason}` : ''}</span></div>}
         {session.role === 'ADMIN' && !staffApplicationOpen && !showUnderwriting && (
           <section className="card table-card">
             <div className="inline-actions" style={{justifyContent:"space-between",alignItems:"center"}}><h2>Recent Applications</h2><button type="button" className="primary" onClick={handleNewApplication}>+ New Application</button></div>
