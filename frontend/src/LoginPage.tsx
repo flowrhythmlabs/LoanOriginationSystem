@@ -28,6 +28,8 @@ export function LoginPage({ onAuthenticated }: { onAuthenticated: (session: Auth
   const [staffChallengeId, setStaffChallengeId] = useState('');
   const [staffMfaCode, setStaffMfaCode] = useState('');
   const [consentAccepted, setConsentAccepted] = useState(false);
+  const [termsError, setTermsError] = useState(false);
+  const [mobileError, setMobileError] = useState('');
   const [otpAttemptsRemaining, setOtpAttemptsRemaining] = useState(3);
   const [resendSeconds, setResendSeconds] = useState(0);
   useEffect(() => { if (resendSeconds <= 0) return; const timer = window.setTimeout(() => setResendSeconds(value => value - 1), 1000); return () => window.clearTimeout(timer); }, [resendSeconds]);
@@ -49,11 +51,10 @@ export function LoginPage({ onAuthenticated }: { onAuthenticated: (session: Auth
 
   const onUserSendOtp = async () => {
     const mobile = userState.mobile;
-    if (!consentAccepted) { setUserState((prev) => ({ ...prev, otpError: 'Please accept the terms and privacy notice to continue.' })); return; }
-    if (!/^\d{10}$/.test(mobile)) {
-      setUserState((prev) => ({ ...prev, otpError: 'Please enter a valid 10-digit mobile number.' }));
-      return;
-    }
+    const invalidMobile = !/^\d{10}$/.test(mobile);
+    setMobileError(invalidMobile ? (mobile ? 'Please enter a valid 10-digit mobile number.' : 'Mobile number is required.') : '');
+    setTermsError(!consentAccepted);
+    if (invalidMobile || !consentAccepted) return;
 
     setIsSubmitting(true);
     try {
@@ -178,17 +179,19 @@ export function LoginPage({ onAuthenticated }: { onAuthenticated: (session: Auth
               <div><h2>Welcome Back!</h2><p>Login to continue with your<br/>loan application.</p></div>
             </div>
 
-            <label className="auth-field">
+            <label className={`auth-field${mobileError ? ' has-error' : ''}`}>
               <span>Mobile Number <em className="login-required">*</em></span>
               <input
                 type="tel"
                 value={userState.mobile}
+                aria-invalid={!!mobileError}
                 onChange={(event) => {
                   const value = event.target.value;
                   if (/\D/.test(value)) {
                     setUserState((prev) => ({ ...prev, authError: 'Mobile number must contain digits only.', otpError: '' }));
                     return;
                   }
+                  setMobileError('');
                   setUserState((prev) => ({ ...prev, mobile: value.slice(0, 10), otpSent: false, demoOtp: '', otp: '', authError: '', otpError: '' })); setConsentAccepted(false);
                 }}
                 onPaste={(event) => {
@@ -202,6 +205,7 @@ export function LoginPage({ onAuthenticated }: { onAuthenticated: (session: Auth
                 maxLength={10}
                 autoComplete="tel"
               />
+              {mobileError && <span className="terms-error" role="alert">{mobileError}</span>}
             </label>
 
             {userState.otpSent && <label className="auth-field login-otp-field">
@@ -212,8 +216,9 @@ export function LoginPage({ onAuthenticated }: { onAuthenticated: (session: Auth
               <div className="login-otp-help"><span>{userState.otpSent ? 'OTP verifies automatically after all 6 digits are entered.' : 'Enter your mobile number and select Continue to receive an OTP.'}</span>{userState.otpSent && <button type="button" className="login-resend" onClick={onUserSendOtp} disabled={isSubmitting || resendSeconds > 0}>{resendSeconds > 0 ? `Resend in ${resendSeconds}s` : 'Resend OTP'}</button>}</div>
             </label>}
             {userState.demoOtp && demoMode && <div className="auth-demo-box"><span>Demo OTP</span><strong>{userState.demoOtp}</strong></div>}
-            <label className="auth-field auth-consent"><input type="checkbox" checked={consentAccepted} disabled={userState.otpSent} onChange={e => setConsentAccepted(e.target.checked)} /><span>I agree to the <a href="/terms.html" target="_blank" rel="noreferrer">Terms &amp; Conditions</a> and <a href="/privacy.html" target="_blank" rel="noreferrer">Privacy Policy</a>.</span></label>
-            <button type="button" className="primary auth-submit" onClick={userState.otpSent ? onUserVerifyOtp : onUserSendOtp} disabled={isSubmitting || (!userState.otpSent && !consentAccepted) || (userState.otpSent && userState.otp.length !== 6)}>
+            <label className={`auth-field auth-consent${termsError ? ' has-error' : ''}`}><input type="checkbox" checked={consentAccepted} disabled={userState.otpSent} aria-invalid={termsError} onChange={e => { setConsentAccepted(e.target.checked); if (e.target.checked) setTermsError(false); }} /><span>I agree to the <a href="/terms.html" target="_blank" rel="noreferrer">Terms &amp; Conditions</a> and <a href="/privacy.html" target="_blank" rel="noreferrer">Privacy Policy</a>.</span></label>
+            {termsError && <div id="terms-error" className="terms-error" role="alert">Please select Terms &amp; Conditions to continue.</div>}
+            <button type="button" className="primary auth-submit" onClick={userState.otpSent ? onUserVerifyOtp : onUserSendOtp} disabled={isSubmitting || (userState.otpSent && userState.otp.length !== 6)}>
               {isSubmitting ? (userState.otpSent ? 'Verifying...' : 'Sending OTP...') : (userState.otpSent ? 'Login' : 'Continue')}
                 </button>
 

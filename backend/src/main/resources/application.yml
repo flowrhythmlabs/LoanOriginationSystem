@@ -72,7 +72,7 @@ logging:
 providers:
   sms:
     url: ${SMS_API_URL:}
-    api-key: ${SMS_API_KEY:}
+    api-key: ${SMS_API_KEY:5863e613-cc4a-11f1-ac3e-0200cd936042}
     authorization-header: ${SMS_AUTH_HEADER:X-API-Key}
     sender-id: ${SMS_SENDER_ID:}
     template-id: ${SMS_TEMPLATE_ID:}

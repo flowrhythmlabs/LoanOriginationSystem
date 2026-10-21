@@ -563,3 +563,12 @@ label:has(> .required-asterisk) > .field-success {
 .credit-manual-field input { max-width:240px; }
 .credit-temp-id { margin:8px 0 12px; }
 .credit-online-field .primary { margin:12px 0; }
+
+.auth-card .auth-consent.has-error { margin-bottom:6px; }
+.auth-card .auth-consent.has-error span { color:#d32f2f; }
+.auth-card .auth-consent.has-error input[type=checkbox] { outline:2px solid #d32f2f; outline-offset:1px; border-radius:3px; accent-color:#d32f2f; }
+.terms-error { color:#d32f2f; font-size:.78rem; line-height:1.3; margin:0 0 14px; }
+
+.auth-field.has-error > span:first-child { color:#d32f2f; }
+.auth-field.has-error input { border-color:#d32f2f !important; background:#fff5f5 !important; box-shadow:0 0 0 1px #d32f2f; }
+.auth-field.has-error .terms-error { margin:6px 0 0; }
