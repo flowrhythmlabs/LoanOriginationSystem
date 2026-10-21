@@ -1,214 +1,115 @@
-// In-memory fake backend for static hosting; enabled by VITE_MOCK_API=true.
-type Json = Record<string, any>;
-
-const apps: Json[] = [];
-const docs: Record<number, Json[]> = {};
-let nextAppId = 1;
-let nextDocId = 1;
-let nextLos = 1;
-
-const json = (body: unknown, status = 200) =>
-  new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
-
-const toApplication = (app: Json) => ({
-  id: app.id,
-  status: app.status,
-  losNumber: app.losNumber,
-  createdAt: app.createdAt,
-  applicant: app.applicant,
-  employmentDetails: app.employment,
-  loanDetails: app.loanDetails,
-  creditCheck: app.creditScore !== null && app.creditScore !== undefined
-    ? { creditScore: app.creditScore, status: app.creditScoreStatus }
-    : null
-});
-
-const toRow = (app: Json) => ({
-  id: app.id,
-  losNumber: app.losNumber,
-  applicantName: app.applicant?.fullName ?? '',
-  applicantMobile: app.applicant?.mobileNumber,
-  loanType: app.loanDetails?.loanType ?? '',
-  requestedAmount: Number(app.loanDetails?.requestedLoanAmount ?? 0),
-  creditScore: app.creditScore ?? null,
-  status: app.status,
-  createdAt: app.createdAt
-});
-
-const seed = () => {
-  const samples = [
-    ['Priya Nair', 'BNQPN4521K', '9811122233', 'HOME_LOAN', 2500000, 742, 'SUBMITTED'],
-    ['Rahul Verma', 'CKLPV7788M', '9822233344', 'PERSONAL_LOAN', 300000, 698, 'SUBMITTED'],
-    ['Sneha Iyer', 'DPQRS1234T', '9833344455', 'CAR_LOAN', 800000, 720, 'DRAFT']
-  ] as const;
-  samples.forEach(([name, pan, mobile, loanType, amount, score, status]) => {
-    const id = nextAppId++;
-    apps.push({
-      id,
-      status,
-      losNumber: status === 'SUBMITTED' ? `LOS-2026-${String(nextLos++).padStart(8, '0')}` : null,
-      createdAt: new Date(Date.now() - id * 86400000).toISOString(),
-      creditScore: score,
-      applicant: {
-        fullName: name, dateOfBirth: '1992-03-10', panNumber: pan, mobileNumber: mobile,
-        email: `${name.split(' ')[0].toLowerCase()}@example.com`, workEmail: `${name.split(' ')[0].toLowerCase()}@company.com`,
-        residentialAddress: '21 Residency Road', city: 'Pune', state: 'Maharashtra', pincode: '411001'
-      },
-      employment: {
-        employmentType: 'SALARIED', employerName: 'Acme Corp', designation: 'Manager',
-        totalWorkExperienceYears: 8, currentEmployerExperienceYears: 3, monthlyInHandSalary: 110000, monthlyGrossSalary: 145000
-      },
-      loanDetails: { loanType, requestedLoanAmount: amount, interestRate: 10.5, preferredTenure: 48, purposeOfLoan: 'Demo application' }
-    });
-    docs[id] = [];
-  });
+/** Local-only demonstration API. Never use for real customer data or production auth. */
+const STORE = 'finedge-netlify-demo-v1';
+type Obj = Record<string, any>;
+type Database = { nextId: number; nextDocumentId: number; applications: Obj[]; documents: Obj[] };
+const read = (): Database => { try { const v = JSON.parse(localStorage.getItem(STORE) || 'null'); if (v?.applications && v?.documents) return v; } catch {} return {nextId:1,nextDocumentId:1,applications:[],documents:[]}; };
+const save = (db: Database) => localStorage.setItem(STORE, JSON.stringify(db));
+const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), {status,headers:{'Content-Type':'application/json'}});
+const error = (message:string, status=400) => json({message},status);
+const getUser = (headers?: HeadersInit) => {
+  const auth = new Headers(headers).get('Authorization') || '';
+  const token = auth.replace(/^Bearer /,'');
+  if (!token.startsWith('demo-')) return null;
+  const stored = sessionStorage.getItem('finedge-auth-session');
+  try { const session = JSON.parse(stored || 'null'); return session?.accessToken === token ? session : null; } catch { return null; }
 };
-
-const handle = async (url: URL, method: string, init?: RequestInit): Promise<Response | null> => {
-  const path = url.pathname;
-  const body = async (): Promise<Json> => {
-    try {
-      return JSON.parse(String(init?.body ?? '{}'));
-    } catch {
-      return {};
-    }
-  };
-
-  if (path === '/api/auth/login/user' && method === 'POST') {
-    const data = await body();
-    return json({ role: 'USER', mobileNumber: data.mobileNumber, token: 'mock-user-token', message: 'Login successful' });
-  }
+const toRow = (a:Obj) => ({id:a.id,losNumber:a.losNumber || null,applicantName:a.applicant?.fullName || null,applicantMobile:a.applicant?.mobileNumber || '',loanType:a.loanDetails?.loanType || null,requestedAmount:Number(a.loanDetails?.requestedLoanAmount || 0),creditScore:a.creditCheck?.creditScore ?? null,status:a.status,createdAt:a.createdAt});
+const clone = <T>(v:T):T => JSON.parse(JSON.stringify(v));
+const delay = (ms=140) => new Promise(resolve=>setTimeout(resolve,ms));
+const defaultApp = (payload:Obj, id:number):Obj => ({id,losNumber:null,status:'DRAFT',createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),applicant:payload.applicant || {},employmentDetails:payload.employmentDetails || {},loanDetails:payload.loanDetails || {},creditCheck:null});
+const pricing:Record<string,number> = {PERSONAL_LOAN:10.5,HOME_LOAN:9.0,CAR_LOAN:10.0,VEHICLE_LOAN:10.0,EDUCATION_LOAN:9.5,BUSINESS_LOAN:13.5,LOAN_AGAINST_PROPERTY:11.0};
+export async function demoFetch(input:RequestInfo|URL, init:RequestInit = {}):Promise<Response> {
+  const path = new URL(String(input),window.location.origin).pathname;
+  if (!path.startsWith('/api/')) return fetch(input,init);
+  await delay();
+  const method = (init.method || 'GET').toUpperCase();
+  const body = ():Obj => { try { return JSON.parse(String(init.body || '{}')); } catch { return {}; } };
+  if (path === '/api/auth/otp/request' || (path === '/api/auth/login/user' && method === 'POST')) return fetch(input,init);
   if (path === '/api/auth/login/admin' && method === 'POST') {
-    const data = await body();
-    return json({ role: 'ADMIN', username: data.username, token: 'mock-admin-token', message: 'Login successful' });
+    const {username,password} = body();
+    if (username !== 'demo.admin' || password !== 'Demo@123') return error('Invalid demo admin credentials.',401);
+    return json({accessToken:'demo-admin-demo.admin'});
   }
-  if (path === '/api/auth/logout') {
-    return json({});
-  }
-  if (path === '/api/applications/counts') {
-    return json({
-      total: apps.length,
-      draft: apps.filter((a) => a.status === 'DRAFT').length,
-      underReview: apps.filter((a) => a.status === 'UNDER_REVIEW').length,
-      submitted: apps.filter((a) => a.status === 'SUBMITTED').length
-    });
-  }
-  if (path === '/api/applications' && method === 'GET') {
-    const term = (url.searchParams.get('search') ?? '').toLowerCase();
-    const status = url.searchParams.get('status') ?? 'ALL';
-    const rows = apps
-      .filter((a) => status === 'ALL' || a.status === status)
-      .filter((a) => !term || [a.applicant?.fullName, a.losNumber, a.applicant?.mobileNumber].some((v) => String(v ?? '').toLowerCase().includes(term)))
-      .map(toRow)
-      .reverse();
-    return json(rows);
-  }
+  if (path === '/api/auth/logout') return json({message:'Signed out'});
+  const user = getUser(init.headers);
+  if (!user) return error('Please sign in to the demo again.',401);
+  if (path.startsWith('/api/pricing/')) return json({interestRate:pricing[decodeURIComponent(path.split('/').pop() || '')] || 10.5});
+  const db = read();
+  if (path === '/api/applications' && method === 'GET') return json(db.applications.filter(a=>user.role==='ADMIN' || a.applicant?.mobileNumber===user.mobile).map(toRow));
   if (path === '/api/applications' && method === 'POST') {
-    const data = await body();
-    const app = {
-      id: nextAppId++, status: 'DRAFT', losNumber: null, createdAt: new Date().toISOString(), creditScore: null,
-      applicant: data.applicant, employment: data.employment, loanDetails: data.loanDetails
-    };
-    apps.push(app);
-    docs[app.id] = [];
-    return json(toApplication(app), 201);
+    const payload=body(); const id=db.nextId++;
+    const app=defaultApp(payload,id);
+    if (user.role==='USER') app.applicant.mobileNumber=user.mobile;
+    db.applications.push(app);save(db);return json(clone(app),201);
   }
-  const match = path.match(/^\/api\/applications\/(\d+)(?:\/(\w+))?(?:\/(\d+))?$/);
-  if (!match) {
-    return null;
+  const m=path.match(/^\/api\/applications\/(\d+)(?:\/(.*))?$/);
+  const adminReview=path.match(/^\/api\/admin\/applications\/(\d+)\/documents\/(\d+)\/review$/);
+  if (adminReview && method==='PUT') {
+    if (user.role!=='ADMIN') return error('Staff login required.',403);
+    const d=db.documents.find(x=>x.applicationId===Number(adminReview[1]) && x.id===Number(adminReview[2]));
+    if (!d) return error('Document not found.',404);
+    const changes=body(); if (!['VERIFIED','REJECTED','DEFICIENCY_RAISED'].includes(changes.status)) return error('Invalid document status.');
+    d.status=changes.status;d.verificationRemarks=changes.remarks || null;save(db);return json(clone(d));
   }
-  const app = apps.find((a) => a.id === Number(match[1]));
-  if (!app) {
-    return json({ message: 'Application not found' }, 404);
+  const decision=path.match(/^\/api\/admin\/applications\/(\d+)\/decision$/);
+  if (decision && method==='PUT') {
+    if (user.role!=='ADMIN') return error('Staff login required.',403);
+    const target=db.applications.find(a=>a.id===Number(decision[1]));
+    if (!target) return error('Application not found.',404);
+    if (!['SUBMITTED','UNDER_REVIEW','APPROVED','REJECTED'].includes(target.status)) return error('Submit the application before an admin decision.');
+    const {status,reason}=body();
+    if (!['APPROVED','REJECTED','UNDER_REVIEW'].includes(status)) return error('Invalid decision status.');
+    target.status=status;target.decisionReason=String(reason || 'Demo decision');target.updatedAt=new Date().toISOString();save(db);return json(clone(target));
   }
-  const sub = match[2];
-
-  if (!sub && method === 'GET') {
-    return json(toApplication(app));
+  if (!m) return error('Demo endpoint not found: '+path,404);
+  const id=Number(m[1]);const sub=m[2] || '';
+  const app=db.applications.find(x=>x.id===id);
+  if (!app) return error('Application not found.',404);
+  if (user.role!=='ADMIN' && app.applicant?.mobileNumber!==user.mobile) return error('This application belongs to another demo user.',403);
+  if (!sub && method==='GET') return json(clone(app));
+  if (!sub && method==='PUT') {
+    if (['SUBMITTED','APPROVED','REJECTED'].includes(app.status)) return error('Submitted applications cannot be edited.');
+    const payload=body();
+    app.applicant={...app.applicant,...(payload.applicant || {}),mobileNumber:app.applicant.mobileNumber};
+    app.employmentDetails={...app.employmentDetails,...(payload.employmentDetails || {})};
+    app.loanDetails={...app.loanDetails,...(payload.loanDetails || {})};
+    app.updatedAt=new Date().toISOString();save(db);return json(clone(app));
   }
-  if (!sub && method === 'PUT') {
-    const data = await body();
-    if (String(data.applicant?.panNumber ?? '').toUpperCase() !== String(app.applicant?.panNumber ?? '').toUpperCase()) {
-      app.kyc = null;
-    }
-    Object.assign(app, { applicant: data.applicant, employment: data.employment, loanDetails: data.loanDetails });
-    return json(toApplication(app));
+  if (sub==='kyc' && method==='POST') {
+    const payload=body();
+    const status=payload.mockMode==='FAILED'?'FAILED':payload.mockMode==='MANUAL_REVIEW'?'MANUAL_REVIEW':'VERIFIED';
+    app.kycStatus=status;save(db);await delay(650);return json({status,provider:'DEMO',message:'Simulated KYC result'});
   }
-  if (sub === 'credit-check') {
-    const data = await body();
-    const scoreText = String(data.creditScore ?? '');
-    const score = Number(scoreText);
-    if (!/^\d+$/.test(scoreText) || score < 300 || score > 900) {
-      return json({ message: 'Credit score must be a whole number between 300 and 900.' }, 400);
-    }
-    app.creditScore = score;
-    app.creditScoreStatus = score <= 649 ? 'POOR' : score <= 749 ? 'FAIR' : 'GOOD';
-    return json(toApplication(app));
+  if (sub==='credit-check' && method==='POST') {
+    if (app.kycStatus!=='VERIFIED') return error('KYC must be verified before the simulated bureau check.');
+    app.creditCheck={creditScore:765,provider:'DEMO',status:'COMPLETED'};app.status='CREDIT_CHECK_COMPLETED';save(db);await delay(650);return json(clone(app));
   }
-  if (sub === 'submit') {
-    const data = await body();
-    const scoreText = String(data.creditScore ?? '');
-    const score = Number(scoreText);
-    if (!/^\d+$/.test(scoreText) || score < 300 || score > 900) {
-      return json({ message: 'Credit score must be a whole number between 300 and 900.' }, 400);
-    }
-    if ((docs[app.id] ?? []).length < 4) {
-      return json({ message: 'Please upload all required documents before submitting the application.' }, 400);
-    }
-    const pan = String(data.panNumber ?? '');
-    if (!String(data.customerName ?? '').trim()) {
-      return json({ message: 'Customer name is required.' }, 400);
-    }
-    if (String(data.customerName).trim() !== String(app.applicant?.fullName ?? '').trim()) {
-      return json({ message: 'Customer name must match the application details.' }, 400);
-    }
-    if (data.verificationType !== 'PAN_VERIFICATION') {
-      return json({ message: 'Only PAN Verification is currently supported.' }, 400);
-    }
-    if (!pan) {
-      return json({ message: 'PAN number is required.' }, 400);
-    }
-    if (!/^[A-Za-z]{5}[0-9]{4}[A-Za-z]$/.test(pan)
-        || pan.toUpperCase() !== String(app.applicant?.panNumber ?? '').toUpperCase()) {
-      return json({ message: 'Enter a valid PAN in the format ABCDE1234F.' }, 400);
-    }
-    app.creditScore = score;
-    app.creditScoreStatus = score <= 649 ? 'POOR' : score <= 749 ? 'FAIR' : 'GOOD';
-    app.kyc = { status: 'VALIDATION_PASSED', verificationType: 'PAN_VERIFICATION' };
-    app.status = 'SUBMITTED';
-    app.losNumber ??= `LOS-2026-${String(nextLos++).padStart(8, '0')}`;
-    return json(toApplication(app));
+  if (sub==='submit' && method==='POST') {
+    if (!app.creditCheck) return error('Complete the simulated KYC and bureau check before submission.');
+    app.status='SUBMITTED';app.losNumber=app.losNumber || `FE-${new Date().getFullYear()}-${String(id).padStart(6,'0')}`;
+    app.updatedAt=new Date().toISOString();save(db);return json(clone(app));
   }
-  if (sub === 'documents' && method === 'GET') {
-    if (match[3]) {
-      return new Response('Mock document preview', { headers: { 'Content-Type': 'text/plain' } });
-    }
-    return json(docs[app.id] ?? []);
+  if (sub==='documents' && method==='GET') return json(db.documents.filter(x=>x.applicationId===id).map(({fileData,...rest})=>rest));
+  if (sub==='documents' && method==='POST') {
+    const form=init.body;
+    if (!(form instanceof FormData)) return error('Document upload must be multipart form data.');
+    const file=form.get('file');
+    if (!(file instanceof File)) return error('Choose a file to upload.');
+    if (!['application/pdf','image/png','image/jpeg'].includes(file.type)) return error('Only PDF, JPG and PNG files are allowed.');
+    if (file.size>5*1024*1024) return error('Document must be smaller than 5 MB.');
+    const type=String(form.get('documentType') || '');
+    const existing=db.documents.find(d=>d.applicationId===id && d.documentType===type);
+    const entry:Obj={id:existing?.id || db.nextDocumentId++,applicationId:id,documentType:type,documentName:String(form.get('documentName')||type),status:'UPLOADED',fileName:file.name,fileSize:file.size,uploadedAt:new Date().toISOString(),error:null,verificationRemarks:null};
+    // Only file metadata is retained; browser-local storage is not a secure document repository.
+    if (existing) Object.assign(existing,entry);else db.documents.push(entry);
+    save(db);return json(entry,201);
   }
-  if (sub === 'documents' && method === 'POST') {
-    const form = init?.body as FormData;
-    const file = form.get('file') as File | null;
-    const type = String(form.get('documentType'));
-    const doc = {
-      id: nextDocId++, documentType: type, documentName: String(form.get('documentName') ?? type), status: 'UPLOADED',
-      fileName: file?.name ?? 'document.pdf', fileSize: file?.size ?? 0, uploadedAt: new Date().toISOString()
-    };
-    docs[app.id] = [...(docs[app.id] ?? []).filter((d) => d.documentType !== type), doc];
-    return json(doc, 201);
+  const docPath=sub.match(/^documents\/(\d+)$/);
+  if (docPath) {
+    const doc=db.documents.find(x=>x.applicationId===id && x.id===Number(docPath[1]));
+    if (!doc) return error('Document not found.',404);
+    if (method==='DELETE') {db.documents=db.documents.filter(x=>x!==doc);save(db);return json({message:'Removed'});}
+    if (method==='GET') return error('This browser-only demo retains document metadata, not the original file. Please re-upload to preview.',404);
   }
-  return null;
-};
-
-export const installMockApi = () => {
-  seed();
-  const realFetch = window.fetch.bind(window);
-  window.fetch = async (input, init) => {
-    const raw = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
-    const url = new URL(raw, window.location.origin);
-    if (!url.pathname.startsWith('/api/')) {
-      return realFetch(input, init);
-    }
-    const method = (init?.method ?? 'GET').toUpperCase();
-    return (await handle(url, method, init)) ?? json({ message: 'Not found' }, 404);
-  };
-};
+  return error('Unsupported demo action: '+method+' '+path,404);
+}

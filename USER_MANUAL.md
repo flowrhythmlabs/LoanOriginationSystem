@@ -11,22 +11,6 @@ FinEdge Bank's Loan Origination System (LOS) is a demonstration application for 
 
 This is a demo. It does not make real lending decisions or connect to a real credit bureau or KYC provider. The login choices are for demonstration and are not production security.
 
-## 1. Login
-
-Users enter exactly 10 digits, select **Send OTP**, and use the fixed demo OTP `123456`. No SMS is sent. Administrators select **Admin** and use the demo username `admin` and password `admin`.
-
-> **DEMO ONLY:** The OTP and admin credentials are public test values and must not be used for a production service.
-
-After successful login, the backend issues a temporary access token for the browser session. Do not share login details or tokens.
-
-## 2. User Security
-
-Users can access and modify only applications belonging to their logged-in mobile number. Users cannot open Admin Recent Applications, search all applications, or access another user's application or documents. The backend checks these permissions even if a URL or request is changed manually.
-
-## 3. Admin Security
-
-Only an authenticated Admin can view Recent Applications, search by LOS number, applicant name, or mobile number, open applications, and update application data. Admin access is enforced by the backend; hiding a screen does not grant permission.
-
 ## How to Log In
 
 ### Step 1 - Open the Application
@@ -39,25 +23,19 @@ Choose **User** on the login screen.
 
 ### Step 3 - Enter a Mobile Number
 
-Enter exactly 10 digits. Do not enter spaces, punctuation, letters, or the country code `+91`; the application rejects non-digit input.
+Enter a 10-digit mobile number using digits only. Do not include the country code `+91`. The application removes punctuation before checking the number, but entering digits only avoids confusion.
 
-### Step 4 - Review and Accept the Terms
+### Step 4 - Send OTP
 
-Review the **Terms & Conditions** and **Privacy Policy** using their links, then select the required acceptance checkbox before choosing **Send OTP**. If you clear the checkbox after the OTP step appears, you must accept again before verifying the OTP. Admin login has its own separate acceptance checkbox.
+Select **Send OTP**. In development mode, the backend generates a short-lived OTP and displays it on screen. This is for development only; production requires an SMS OTP provider.
 
-The displayed policy is draft demonstration wording, not legal advice or an approved bank policy. The current login flow validates consent in the frontend only; it does not persist an acceptance timestamp, policy version, or user identifier for audit. Legal/compliance review and backend consent-audit persistence are required before relying on this as production consent.
+### Step 5 - Enter OTP
 
-### Step 5 - Send OTP
+Enter the six-digit OTP returned by the development screen and select **Verify OTP**.
 
-Select **Send OTP**. This demo does not send a text message; it displays the test OTP on the screen.
+> **DEVELOPMENT ONLY:** The generated OTP is exposed by the development configuration for local testing. No SMS is sent. Production must disable OTP exposure and integrate an SMS provider.
 
-### Step 6 - Enter OTP
-
-Enter `123456` and select **Verify OTP**.
-
-> **DEMO / TEST ONLY:** `123456` is a fixed test code, not a real one-time password.
-
-### Step 7 - Enter the Application
+### Step 6 - Enter the Application
 
 After login, the application form appears. Its sections are on one page. The numbered progress marker is an indicator, not a set of separate pages. Some fields contain sample values; replace those values with the information for the application you are preparing.
 
@@ -65,7 +43,7 @@ After login, the application form appears. Its sections are on one page. The num
 
 ### 1. Applicant Details
 
-Enter the applicant's full name, date of birth, PAN, mobile number, email addresses, residential address, city, state, and pincode. PAN must use five letters, four digits, and one letter, for example `ABCDE1234F`. Use a 10-digit Indian mobile number beginning with 6, 7, 8, or 9 when entering applicant details.
+Enter the applicant's full name, date of birth, PAN, mobile number, email addresses, residential address, city, state, and pincode. The mock PAN check expects the format of five letters, four digits, and one letter, for example `ABCDE1234F`. Use a 10-digit Indian mobile number beginning with 6, 7, 8, or 9 when entering applicant details.
 
 The application may report a validation message if PAN, loan values, or monthly in-hand salary are invalid. Complete the displayed fields carefully; some missing values may be rejected by the backend without a field-specific message.
 
@@ -75,24 +53,24 @@ Choose an employment type: Salaried, Self Employed, or Business Owner. Enter emp
 
 ### 3. Credit Score
 
-Enter a whole-number credit score from 300 through 900. Credit Score is manually entered and validated against the configured 300-900 range. The status updates as you type: 300-649 is **POOR**, 650-749 is **FAIR**, and 750-900 is **GOOD**. The value is not fetched from a credit bureau.
+Select **Run Credit Check** to save the application and persist a simulated score. It is not a real bureau result and must not be used for a financial decision.
+
+> **Current limitation:** The simulated result is now stored against the application. A real credit bureau integration is still required before production use.
 
 ### 4. KYC Verification
 
-Confirm the customer name, choose **PAN Verification**, enter a PAN, and select **Validate KYC**. Lowercase letters are converted to uppercase. A valid format contains exactly five letters, four digits, and one letter, for example `ABCDE1234F`.
-
-KYC currently uses manually entered PAN information with local format validation. No external KYC provider is currently connected. The button makes no API request. A valid result is shown as **PAN Format Valid** with status **VALID**; an invalid PAN is shown as **Invalid PAN Format** with status **INVALID**. This does not mean government or bureau verification. The backend independently validates these details during final submission. After reopening a draft, select **Validate KYC** again before submitting.
+For an application that has already been created, select **Start KYC Verification** to request a mock PAN-verification result. This is separate from loan submission and is not required by the current submit service. The mode selector is displayed in the form, but its selection is not currently passed through to the backend provider; outcomes are controlled by backend mock behavior/configuration.
 
 ### 5. Loan Details
 
-Select a loan type, then enter the requested amount, preferred tenure in months, annual interest rate, and purpose of the loan.
+Select a loan type, then enter the requested amount, preferred tenure in months, and purpose of the loan. The annual interest rate is read-only and comes from backend configuration.
 
 | Field | What to enter |
 | --- | --- |
 | Loan Type | Personal, Home, Car, or Education Loan |
 | Requested Loan Amount | An amount greater than zero |
 | Preferred Tenure | A positive whole number of months |
-| Interest Rate | A percentage from 0% through the configured maximum; the default maximum is 30% per year |
+| Interest Rate | Read-only; set by backend product-rate configuration. Default prototype rates are not approved lending rates. |
 | Purpose of Loan | A short explanation of the intended purpose |
 
 The EMI estimate updates when the amount, interest rate, or tenure changes. EMI means **Equated Monthly Instalment**, the estimated monthly payment. The screen also shows estimated total interest and total amount payable. These are demo calculations, not an offer or financial advice.
@@ -108,53 +86,48 @@ The application lists four required document types:
 
 For each item, select **Choose File**, choose a non-empty PDF, JPG/JPEG, or PNG file, and check that its status changes to **Uploaded**. Each file must be no larger than 10 MB. If a document is already uploaded, select **Replace** to upload a replacement. Use **View** to open a stored file.
 
-All four document types must be uploaded before the backend accepts a submission. Document bytes are stored on the backend server's filesystem; document metadata is stored in PostgreSQL.
+All four document types must be uploaded before the backend accepts a submission. Uploaded files and their records are stored on the local server.
 
 ### 7. Save a Draft
 
-Select **Save Draft** to store the current applicant, employment, and loan details in PostgreSQL. Uploaded documents are stored when each upload succeeds. Draft data remains available after browser refresh, logout, or backend restart as long as the backend reconnects to the same PostgreSQL database and the document-storage directory is retained.
+Select **Save Draft** to store the current applicant, employment, and loan details. Uploaded documents are stored when each upload succeeds. The data remains in the local application database after a browser refresh or backend restart. When you log in again, the latest saved draft is automatically reopened if one exists.
 
-There is no User-facing saved-application list in the current application, so a User cannot select and reopen a draft from the screen. An Admin can use **Recent Applications** and **Open** to reload a saved application. The application form itself does not automatically restore the last draft after a refresh.
 
-### Where application data is stored
-
-The running application uses the PostgreSQL database `loan_origination` by default. PostgreSQL stores applicant, loan, application, credit-check, KYC, and document metadata. Uploaded document files are stored separately on the backend filesystem, in `backend/data/documents/` by default. Both the database and document directory must be retained to preserve applications and their uploaded files. Existing records from the former H2 database are not imported automatically.
 
 ### 8. Submit the Application
 
-Complete the required applicant and loan fields, enter a valid credit score, validate the PAN format, upload all four required document types, and select **Submit Application**. The backend validates these requirements again. If a required value or document is missing or invalid, submission is rejected with a validation message. **Save Draft** remains available without a credit score or completed KYC validation.
+Complete the fields, upload all four required document types, and select **Submit Application**. The backend also requires a persisted credit-check record. The current screen now creates that record through the application-specific endpoint. The score remains simulated until a real bureau integration is configured. If required documents are missing, the page asks you to upload them first.
 
-If submission succeeds, the confirmation panel shows the application status and LOS Number. The current application-summary download button does not perform a download.
+If submission succeeds, the confirmation panel shows the application status and Application Number. The current application-summary download button does not perform a download.
 
-## LOS Number
+## Application Number
 
-The LOS Number is the unique reference number assigned to your submitted loan application. It is generated by the backend only after the submission requirements pass, stored with the application, and shown on the confirmation panel. The Admin Recent Applications table also displays it.
+The Application Number (stored internally as the LOS Number in this prototype) is the unique reference number assigned to your submitted loan application. It is generated by the backend only after the submission requirements pass, stored with the application, and shown on the confirmation panel. The Admin Recent Applications table also displays it.
 
-The current format is `LOS-YYYY-########`, where `YYYY` is the year and the final eight digits are a sequence; for example, `LOS-2026-00000001`. Keep the number so an Admin can find the application. A number is assigned only after the backend accepts the submission.
+The current format is `LOS-YYYY-########`, where `YYYY` is the year and the final eight digits are a sequence; for example, `LOS-2026-00000001`. Keep the number so an Admin can find the application. Because the current credit-check integration can block submission, a number will not appear unless the backend accepts the submission.
 
 # Administrator Guide
 
 ## Admin Login
 
 1. Select **Admin** on the login screen.
-2. Review the **Terms & Conditions** and **Privacy Policy**, then select the required acceptance checkbox.
-3. Enter the admin username.
-4. Enter the admin password.
-5. Select **Login**.
+2. Enter the admin username.
+3. Enter the admin password.
+4. Select **Login**.
 
 > **DEMO / DEVELOPMENT ONLY:** The current demo credentials are username `admin` and password `admin`. Do not use these credentials for a real service.
 
-The backend verifies these credentials and returns a temporary demo access token. This is not a secure production identity system.
+Admin credentials are validated by the backend and a server-issued bearer token is required for protected APIs. Configure `LOS_ADMIN_USERNAME` and `LOS_ADMIN_PASSWORD` before use; the default `admin/admin` values are development-only and must not be used in production.
 
 ## Admin Dashboard and Recent Applications
 
-The Admin view is part of the same page as the application form. It shows Total Applications, Draft Applications, Under Review, and Submitted Applications counts, followed by the **Recent Applications** table. The counts and table data come from the backend; statuses that are not assigned by the current workflow may remain at zero. Search results do not change the dashboard totals.
+The Admin view is part of the same page as the application form. It shows counts for Total Applications, Draft Applications, Under Review, and Submitted Applications, followed by the **Recent Applications** table. These are counts and rows from the backend application list; statuses that are not assigned by the current workflow may remain at zero.
 
 ## Search and Filter
 
-Type part of an applicant name, LOS Number, or mobile number in the search field. Search ignores letter case for names and LOS numbers and matches a substring. Search and status filtering are performed by the backend against persisted PostgreSQL data. Use the status menu to show All Status, Draft, or Submitted applications.
+Type part of an applicant name, Application Number, or mobile number in the search field. Search ignores letter case and matches a substring. Use the status menu to show All Status, Draft, or Submitted applications.
 
-Examples: searching `amit` can match an applicant named Amit Sharma; searching `LOS-2026` can match LOS numbers from that year; searching `9876` can match a mobile number containing those digits.
+Examples: searching `amit` can match an applicant named Amit Sharma; searching `LOS-2026` can match LOS numbers from that year.
 
 ## Open and Update an Application
 
@@ -175,25 +148,16 @@ Both User and Admin can select **Logout** in the top navigation. This clears the
 | Message or situation | What to do |
 | --- | --- |
 | Invalid mobile number | Enter 10 digits. For applicant details, use an Indian mobile number beginning with 6-9. Do not include `+91`. |
-| Invalid OTP | Enter the demo code `123456`. No SMS is sent. |
+| Invalid OTP | Request a new OTP and enter the six-digit code shown in development mode. No SMS is sent by the current prototype. |
 | Required document not uploaded | Upload each of the four listed document types and confirm each shows **Uploaded**. |
-| Application cannot be submitted | Correct the highlighted applicant, loan, or credit-score fields; validate PAN format; and confirm all four documents show **Uploaded**. Save Draft remains available if score or KYC details are not ready. |
+| Application cannot be submitted | Confirm all four documents are uploaded. The backend also requires a persisted credit check; the current UI does not save its displayed mock score, so this error may persist. Contact the application maintainer. |
 | Unable to open application | Confirm the application still appears in Recent Applications and try again. If it continues, contact the application maintainer. |
-| Session expired or returned to login | Log in again. The demo login is stored in the current browser session and the UI clears it after an API authorization error. |
+| Session expired or returned to login | Log in again. The backend bearer token expires after the configured session lifetime and the UI clears it after an API authorization error. |
 | Upload failed | Choose a non-empty PDF/JPG/JPEG/PNG file up to 10 MB and retry. |
-| Applications or documents are unavailable after a restart | Ask the application operator to confirm PostgreSQL is running and that the same database and document-storage directory are configured. |
-
-## 7. Security Best Practices for Users
-
-- Do not share demo login credentials or OTPs.
-- Log out after completing work, especially on a shared computer.
-- Upload only supported PDF, JPG/JPEG, or PNG files no larger than 10 MB.
-- Do not attempt to open or modify applications or documents that do not belong to you.
-- Do not enter real customer information into this demonstration environment unless it has been approved for that use.
 
 ## Important Notes
 
 - This is a development/demo LOS application, not a production lending service.
-- The OTP and Admin credentials are fixed demo values.
-- Credit scores are manually entered and do not come from a credit bureau. PAN KYC checks only local input format; no external KYC provider is connected.
+- Development OTPs are generated by the backend and shown in the UI only when `LOS_DEMO_OTP_ENABLED=true`; no SMS is sent. Admin credentials are backend-configured, and the defaults are development-only.
+- Mock credit and KYC results are not real verification results.
 - Production login, authorization, workflow, and provider behavior may be different. Do not enter real sensitive customer data into an unapproved demo environment.
