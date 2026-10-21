@@ -7,8 +7,8 @@ spring:
   datasource:
     url: ${DB_URL:jdbc:postgresql://localhost:5432/finedge}
     driver-class-name: ${DB_DRIVER_CLASS_NAME:org.postgresql.Driver}
-    username: ${DB_USERNAME:finedge}
-    password: ${DB_PASSWORD:postgres}
+    username: ${DB_USERNAME:postgres}
+    password: ${DB_PASSWORD:root}
   h2:
     console:
       enabled: ${H2_CONSOLE_ENABLED:false}
@@ -20,7 +20,6 @@ spring:
     properties:
       hibernate:
         format_sql: true
-        dialect: org.hibernate.dialect.PostgreSQLDialect
   servlet:
     multipart:
       max-file-size: 5MB

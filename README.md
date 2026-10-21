@@ -133,6 +133,10 @@ mvn spring-boot:run
 
 The backend listens on `http://localhost:8080`.
 
+Hibernate detects the SQL dialect from the configured datasource. Do not force the PostgreSQL dialect in shared configuration: the `test` profile uses H2, which cannot execute PostgreSQL-specific identity inserts. A mismatched dialect can cause the OTP consent insert to fail with HTTP 500 before SMS delivery.
+
+For normal local use, run without the `test` profile to use PostgreSQL. The `test` profile uses an in-memory database that is discarded when the backend stops.
+
 Frontend:
 
 ```bash
