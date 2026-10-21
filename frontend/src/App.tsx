@@ -866,10 +866,61 @@ function App() {
   const loanSpecificDocuments: Array<{key: DocumentType; label: string; required: boolean}> = (loanDetails.loanType === 'HOME_LOAN' || loanDetails.loanType === 'LOAN_AGAINST_PROPERTY') ? [{key:'PROPERTY_DOCUMENTS',label:'Property documents (title deed, sale agreement, approved plan, valuation, tax receipt)',required:true}] : loanDetails.loanType === 'CAR_LOAN' ? [{key:'VEHICLE_DOCUMENTS',label:'Vehicle quotation / proforma invoice and insurance',required:true}] : loanDetails.loanType === 'EDUCATION_LOAN' ? [{key:'EDUCATION_DOCUMENTS',label:'Admission letter, fee structure and education records',required:true}] : [];
   const coApplicantDocuments = applicant.additionalDetails?.coApplicantRequired === 'true' && applicant.additionalDetails?.coApplicantName?.trim() ? [{key:'COAPPLICANT_PAN' as DocumentType,label:'Co-applicant PAN',required:true},{key:'COAPPLICANT_KYC' as DocumentType,label:'Co-applicant KYC / Aadhaar document',required:true},{key:'COAPPLICANT_BANK_STATEMENT' as DocumentType,label:'Co-applicant bank statement (if earning)',required:applicant.additionalDetails?.coApplicantType === 'Earning'},{key:'COAPPLICANT_PHOTOGRAPH' as DocumentType,label:'Co-applicant photograph',required:true},{key:'COAPPLICANT_SIGNATURE' as DocumentType,label:'Co-applicant signature / e-sign',required:true}] : [];
   const guarantorDocuments = applicant.additionalDetails?.guarantorName?.trim() ? [{key:'GUARANTOR_PAN' as DocumentType,label:'Guarantor PAN',required:true},{key:'GUARANTOR_KYC' as DocumentType,label:'Guarantor KYC / Aadhaar document',required:true},{key:'GUARANTOR_BANK_STATEMENT' as DocumentType,label:'Guarantor bank statement',required:true},{key:'GUARANTOR_PHOTOGRAPH' as DocumentType,label:'Guarantor photograph',required:true},{key:'GUARANTOR_SIGNATURE' as DocumentType,label:'Guarantor signature / e-sign',required:true}] : [];
+  const guarantorEnabled = loanDetails.additionalDetails?.guarantorRequired === 'true' || Boolean(applicant.additionalDetails?.guarantorName?.trim());
+  const guarantorValidationMessage = (() => {
+    if (!guarantorEnabled) return '';
+    const details = applicant.additionalDetails || {};
+    const requiredFields: Array<[string, string]> = [
+      ['Name', details.guarantorName],
+      ['Relationship', details.guarantorRelationship],
+      ['PAN', details.guarantorPan],
+      ['Mobile', details.guarantorMobile],
+      ['Email', details.guarantorEmail],
+      ['Address', details.guarantorAddress],
+      ['KYC/Bureau Consent', details.guarantorConsent === 'true' ? 'true' : ''],
+      ['Date of Birth', details.guarantorDob],
+      ['Gender', details.guarantorGender],
+      ["Father's / Spouse Name", details.guarantorFatherSpouse],
+      ["Mother's Name", details.guarantorMother],
+      ['Marital Status', details.guarantorMaritalStatus],
+      ['Nationality', details.guarantorNationality],
+      ['Aadhaar / KYC Document', details.guarantorKycDocument],
+      ['Alternate ID Type', details.guarantorAlternateIdType],
+      ['Alternate ID Number', details.guarantorAlternateIdNumber],
+      ['Current Address', details.guarantorCurrentAddress],
+      ['Permanent Address', details.guarantorPermanentAddress],
+      ['City', details.guarantorCity],
+      ['State', details.guarantorState],
+      ['PIN Code', details.guarantorPincode],
+      ['Residence Type', details.guarantorResidenceType],
+      ['Years at Address', details.guarantorYearsAtAddress],
+      ['Employer / Business', details.guarantorEmployer],
+      ['Designation / User Type', details.guarantorDesignation],
+      ['Years in Job / Business', details.guarantorExperience],
+      ['Monthly Income', details.guarantorMonthlyIncome],
+      ['Annual Income', details.guarantorAnnualIncome],
+      ['Other Income', details.guarantorOtherIncome],
+      ['Account Holder', details.guarantorAccountHolder],
+      ['Bank Account', details.guarantorAccountNumber],
+      ['IFSC', details.guarantorIfsc],
+      ['Bank Name', details.guarantorBank],
+      ['Branch', details.guarantorBranch],
+      ['Account Type', details.guarantorAccountType]
+    ];
+    const missingFields = requiredFields.filter(([, value]) => !value?.trim()).map(([label]) => label);
+    if (missingFields.length) return `Complete all required guarantor fields: ${missingFields.join(', ')}.`;
+    if (!validName(details.guarantorName || '')) return 'Guarantor name must contain letters only.';
+    if (!validPan(details.guarantorPan || '')) return 'Guarantor PAN should look like ABCDE1234F.';
+    if (!/^\d{10}$/.test(details.guarantorMobile || '')) return 'Guarantor mobile must contain 10 digits.';
+    if (!validEmail(details.guarantorEmail || '')) return 'Enter a valid guarantor email address.';
+    if (!/^[1-9][0-9]{5}$/.test(details.guarantorPincode || '')) return 'Guarantor PIN code must be a valid 6-digit Indian PIN code.';
+    if (!/^[A-Z]{4}0[A-Z0-9]{6}$/.test(details.guarantorIfsc || '')) return 'Guarantor IFSC must be 11 characters, e.g. ABCD0123456.';
+    return '';
+  })();
   const requiredDocuments = [...employmentChecklist, {key:'ADDRESS_PROOF' as DocumentType,label:'Address proof (approved document)',required:true}, {key:'EXISTING_LOAN_STATEMENTS' as DocumentType,label:'Existing loan statements / sanction letters (if applicable)',required:false}, ...(employment.employmentType === 'BUSINESS_OWNER' ? [{key:'BUSINESS_FINANCIALS' as DocumentType,label:'Balance sheet and profit & loss statements',required:true}] : []), ...loanSpecificDocuments, ...coApplicantDocuments, ...guarantorDocuments];
   const missingDocuments = requiredDocuments.filter((doc) => doc.required && documents[doc.key].status !== 'VERIFIED');
   const requiredDocumentsNotUploaded = requiredDocuments.filter(doc => doc.required && !['UPLOADED','UNDER_REVIEW','VERIFIED'].includes(documents[doc.key].status));
-  const continueDisabledReason = currentStep === 1 && (!applicant.fullName || !validName(applicant.fullName) || !applicant.dateOfBirth || !validPan(applicant.panNumber) || !validEmail(applicant.email) || !applicant.workEmail || !validEmail(applicant.workEmail) || !/^[1-9][0-9]{5}$/.test(applicant.pincode) || !employment.employmentType || Number(employment.monthlyInHandSalary) <= 0 || (employment.employmentType === 'SALARIED' && (!employment.employerName.trim() || !employment.designation.trim())) || (applicant.additionalDetails?.coApplicantRequired === 'true' && (!applicant.additionalDetails?.coApplicantName?.trim() || (applicant.additionalDetails?.coApplicantPan && !validPan(applicant.additionalDetails.coApplicantPan)) || (applicant.additionalDetails?.coApplicantEmail && !validEmail(applicant.additionalDetails.coApplicantEmail))))) ? 'Complete required applicant, contact, employment, income and co-applicant fields first.' : currentStep === 2 && (loanValidationMessage || loanExtraValidationMessage) ? (loanValidationMessage || loanExtraValidationMessage) : currentStep === 3 && (applicant.additionalDetails?.kycBureauConsent !== 'true' || (creditMode === 'ONLINE' ? creditScore === null || isCheckingCredit : !/^[0-9]{3}$/.test(manualCreditScore) || Number(manualCreditScore) < 300 || Number(manualCreditScore) > 900)) ? (creditMode === 'ONLINE' ? 'Provide consent and complete the online bureau check before continuing.' : 'Provide consent and enter a valid self-reported score from 300 to 900.') : currentStep === 4 && requiredDocumentsNotUploaded.length > 0 ? `Upload all required documents before continuing: ${requiredDocumentsNotUploaded.map(doc => doc.label).join(', ')}.` : '';
+  const continueDisabledReason = currentStep === 1 && guarantorEnabled && guarantorValidationMessage ? guarantorValidationMessage : currentStep === 1 && (!applicant.fullName || !validName(applicant.fullName) || !applicant.dateOfBirth || !validPan(applicant.panNumber) || !validEmail(applicant.email) || !applicant.workEmail || !validEmail(applicant.workEmail) || !/^[1-9][0-9]{5}$/.test(applicant.pincode) || !employment.employmentType || Number(employment.monthlyInHandSalary) <= 0 || (employment.employmentType === 'SALARIED' && (!employment.employerName.trim() || !employment.designation.trim())) || (applicant.additionalDetails?.coApplicantRequired === 'true' && (!applicant.additionalDetails?.coApplicantName?.trim() || (applicant.additionalDetails?.coApplicantPan && !validPan(applicant.additionalDetails.coApplicantPan)) || (applicant.additionalDetails?.coApplicantEmail && !validEmail(applicant.additionalDetails.coApplicantEmail))))) ? 'Complete required applicant, contact, employment, income and co-applicant fields first.' : currentStep === 2 && (loanValidationMessage || loanExtraValidationMessage) ? (loanValidationMessage || loanExtraValidationMessage) : currentStep === 3 && (applicant.additionalDetails?.kycBureauConsent !== 'true' || (creditMode === 'ONLINE' ? creditScore === null || isCheckingCredit : !/^[0-9]{3}$/.test(manualCreditScore) || Number(manualCreditScore) < 300 || Number(manualCreditScore) > 900)) ? (creditMode === 'ONLINE' ? 'Provide consent and complete the online bureau check before continuing.' : 'Provide consent and enter a valid self-reported score from 300 to 900.') : currentStep === 4 && requiredDocumentsNotUploaded.length > 0 ? `Upload all required documents before continuing: ${requiredDocumentsNotUploaded.map(doc => doc.label).join(', ')}.` : '';
   const missingFieldCount = [!applicant.fullName, !validPan(applicant.panNumber), !validEmail(applicant.email), (applicant.workEmail !== '' && !validEmail(applicant.workEmail)), !/^[1-9][0-9]{5}$/.test(applicant.pincode), !!loanValidationMessage, !!loanExtraValidationMessage].filter(Boolean).length;
 
   const handleSubmit = async () => {
@@ -880,10 +931,10 @@ function App() {
       if (!applicant.fullName || !validName(applicant.fullName)) { setValidationMessage('Enter a valid full name using letters only.'); return; }
       if (!validPan(applicant.panNumber)) { setValidationMessage('PAN should look like ABCDE1234F.'); return; }
       if (!validEmail(applicant.email) || !applicant.workEmail || !validEmail(applicant.workEmail)) { setValidationMessage('Enter valid personal and work email addresses.'); return; }
-      const extraEmails = [employment.additionalDetails?.officialEmail, employment.additionalDetails?.businessEmail, ...(applicant.additionalDetails?.coApplicantRequired === 'true' ? [applicant.additionalDetails?.coApplicantEmail, applicant.additionalDetails?.coApplicantWorkEmail] : []), applicant.additionalDetails?.guarantorEmail].filter((value): value is string => Boolean(value));
+      const extraEmails = [employment.additionalDetails?.officialEmail, employment.additionalDetails?.businessEmail, ...(applicant.additionalDetails?.coApplicantRequired === 'true' ? [applicant.additionalDetails?.coApplicantEmail, applicant.additionalDetails?.coApplicantWorkEmail] : []), ...(guarantorEnabled ? [applicant.additionalDetails?.guarantorEmail] : [])].filter((value): value is string => Boolean(value));
       if (extraEmails.some(value => !validEmail(value))) { setValidationMessage('Correct the employer, business, co-applicant or guarantor email format before submission.'); return; }
       if (!/^[1-9][0-9]{5}$/.test(applicant.pincode)) { setValidationMessage('PIN code must be a valid 6-digit Indian PIN code.'); return; }
-      const suppliedIfscs = [applicant.additionalDetails?.ifscCode, ...(applicant.additionalDetails?.coApplicantRequired === 'true' ? [applicant.additionalDetails?.coApplicantIfsc] : []), applicant.additionalDetails?.guarantorIfsc].filter((value): value is string => Boolean(value));
+      const suppliedIfscs = [applicant.additionalDetails?.ifscCode, ...(applicant.additionalDetails?.coApplicantRequired === 'true' ? [applicant.additionalDetails?.coApplicantIfsc] : []), ...(guarantorEnabled ? [applicant.additionalDetails?.guarantorIfsc] : [])].filter((value): value is string => Boolean(value));
       if (suppliedIfscs.some(value => !/^[A-Z]{4}0[A-Z0-9]{6}$/.test(value))) { setValidationMessage('Correct the IFSC code format. IFSC must contain 11 characters, for example ABCD0123456.'); return; }
       if (applicant.additionalDetails?.coApplicantRequired === 'true') {
         if (!applicant.additionalDetails?.coApplicantName?.trim()) { setValidationMessage('Enter the co-applicant name or uncheck Include a co-applicant.'); return; }
@@ -891,8 +942,7 @@ function App() {
         if (applicant.additionalDetails?.coApplicantPan && !validPan(applicant.additionalDetails.coApplicantPan)) { setValidationMessage('Co-applicant PAN should look like ABCDE1234F.'); return; }
         if (applicant.additionalDetails?.coApplicantEmail && !validEmail(applicant.additionalDetails.coApplicantEmail)) { setValidationMessage('Enter a valid co-applicant email address.'); return; }
       }
-      if (applicant.additionalDetails?.guarantorPan && !validPan(applicant.additionalDetails.guarantorPan)) { setValidationMessage('Guarantor PAN should look like ABCDE1234F.'); return; }
-      if (applicant.additionalDetails?.guarantorEmail && !validEmail(applicant.additionalDetails.guarantorEmail)) { setValidationMessage('Enter a valid guarantor email address.'); return; }
+      if (guarantorEnabled && guarantorValidationMessage) { setValidationMessage(guarantorValidationMessage); return; }
       if (loanDetails.additionalDetails?.declarationAccepted !== 'true') { setValidationMessage('Please accept the declaration on the Review & Submit screen.'); return; }
       if (loanValidationMessage || loanExtraValidationMessage) {
         setValidationMessage(loanValidationMessage || loanExtraValidationMessage);
@@ -1154,6 +1204,51 @@ function App() {
       return previous;
     });
   };
+  const handleGuarantorToggle = (checked: boolean) => {
+    if (checked) {
+      setLoanExtra('guarantorRequired', 'true');
+      return;
+    }
+
+    const guarantorDetails = applicant.additionalDetails || {};
+    const hasEnteredData = Object.entries(guarantorDetails).some(([key, value]) =>
+      key.startsWith('guarantor')
+      && key !== 'guarantorRequired'
+      && key !== 'guarantorKycStatus'
+      && value.trim().length > 0
+      && value !== 'false'
+      && value !== 'Not started'
+    );
+    if (hasEnteredData && !window.confirm('Unchecking this box will remove the guarantor details you entered. Continue?')) return;
+
+    setApplicant(previous => {
+      const additionalDetails = { ...(previous.additionalDetails || {}) };
+      Object.keys(additionalDetails).forEach(key => {
+        if (key.startsWith('guarantor')) delete additionalDetails[key];
+      });
+      return { ...previous, additionalDetails };
+    });
+    setLoanExtra('guarantorRequired', 'false');
+    setIfscMessages(previous => ({ ...previous, guarantor: { text: '', error: false } }));
+    setValidationMessage(previous => {
+      if (previous.startsWith('Complete all required guarantor fields:')
+        || previous === 'Guarantor name must contain letters only.'
+        || previous === 'Guarantor PAN should look like ABCDE1234F.'
+        || previous === 'Guarantor mobile must contain 10 digits.'
+        || previous === 'Enter a valid guarantor email address.'
+        || previous === 'Guarantor PIN code must be a valid 6-digit Indian PIN code.'
+        || previous === 'Guarantor IFSC must be 11 characters, e.g. ABCD0123456.') return '';
+      if (previous === 'Correct the employer, business, co-applicant or guarantor email format before submission.') {
+        const otherEmails = [employment.additionalDetails?.officialEmail, employment.additionalDetails?.businessEmail, ...(applicant.additionalDetails?.coApplicantRequired === 'true' ? [applicant.additionalDetails?.coApplicantEmail, applicant.additionalDetails?.coApplicantWorkEmail] : [])].filter((value): value is string => Boolean(value));
+        if (!otherEmails.some(value => !validEmail(value))) return '';
+      }
+      if (previous === 'Correct the IFSC code format. IFSC must contain 11 characters, for example ABCD0123456.') {
+        const otherIfscs = [applicant.additionalDetails?.ifscCode, ...(applicant.additionalDetails?.coApplicantRequired === 'true' ? [applicant.additionalDetails?.coApplicantIfsc] : [])].filter((value): value is string => Boolean(value));
+        if (!otherIfscs.some(value => !/^[A-Z]{4}0[A-Z0-9]{6}$/.test(value))) return '';
+      }
+      return previous;
+    });
+  };
   const setEmploymentExtra = (key: string, value: string) => setEmployment(prev => ({ ...prev, additionalDetails: { ...(prev.additionalDetails || {}), [key]: value } }));
   const setLoanExtra = (key: string, value: string) => setLoanDetails(prev => ({ ...prev, additionalDetails: { ...(prev.additionalDetails || {}), [key]: value } }));
   const lookupIfsc = async (fieldKey: string, ifscValue: string, bankKey: string, branchKey: string) => {
@@ -1399,41 +1494,50 @@ function App() {
             <label>Branch<input value={applicant.additionalDetails?.coApplicantBranch || ''} onChange={e => setApplicantExtra('coApplicantBranch', e.target.value)} /></label>
             <label>Account Type<select value={applicant.additionalDetails?.coApplicantAccountType || ''} onChange={e => setApplicantExtra('coApplicantAccountType', e.target.value)}><option value="">Select</option><option>Savings</option><option>Current</option></select></label>
             </div></section>}
-            <section className="card form-card" aria-label="Guarantor details"><h3>Guarantor details</h3><div className="field-grid">
-            <label>Guarantor Name (if required)<input value={applicant.additionalDetails?.guarantorName || ''} onChange={e => setApplicantExtra('guarantorName', e.target.value.replace(/[^A-Za-z .'-]/g, ''))} /></label>
-            <label>Guarantor Relationship<input value={applicant.additionalDetails?.guarantorRelationship || ''} onChange={e => setApplicantExtra('guarantorRelationship', e.target.value.replace(/[^A-Za-z .'-]/g, ''))} /></label>
-            <label>Guarantor PAN<input maxLength={10} value={applicant.additionalDetails?.guarantorPan || ''} onChange={e => setApplicantExtra('guarantorPan', e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))} />{applicant.additionalDetails?.guarantorPan && !validPan(applicant.additionalDetails.guarantorPan) && <small className="field-error">PAN should look like ABCDE1234F.</small>}</label>
-            <label>Guarantor Mobile<input inputMode="numeric" maxLength={10} value={applicant.additionalDetails?.guarantorMobile || ''} onChange={e => setApplicantExtra('guarantorMobile', e.target.value.replace(/\D/g,'').slice(0,10))} /></label>
-            <label>Guarantor Email<input type="email" value={applicant.additionalDetails?.guarantorEmail || ''} onChange={e => setApplicantExtra('guarantorEmail', e.target.value)} onBlur={() => setValidationMessage(applicant.additionalDetails?.guarantorEmail && !validEmail(applicant.additionalDetails.guarantorEmail) ? 'Enter a valid guarantor email address.' : '')} />{applicant.additionalDetails?.guarantorEmail && !validEmail(applicant.additionalDetails.guarantorEmail) && <small className="field-error">Enter a valid guarantor email address.</small>}</label>
-            <label className="full-width">Guarantor Address<input value={applicant.additionalDetails?.guarantorAddress || ''} onChange={e => setApplicantExtra('guarantorAddress', e.target.value)} /></label>
-            <label>Guarantor KYC/Bureau Consent<select value={applicant.additionalDetails?.guarantorConsent || 'false'} onChange={e => setApplicantExtra('guarantorConsent', e.target.value)}><option value="false">Not provided</option><option value="true">Consented</option></select></label><label>Guarantor KYC Status<input readOnly value={applicant.additionalDetails?.guarantorKycStatus || 'Not started'} /></label>
-            <label>Guarantor Date of Birth<input type="date" max={new Date().toISOString().slice(0,10)} value={applicant.additionalDetails?.guarantorDob || ''} onChange={e => setApplicantExtra('guarantorDob', e.target.value)} /></label>
-            <label>Guarantor Age<input readOnly value={calculateAge(applicant.additionalDetails?.guarantorDob || '')} /></label>
-            <label>Guarantor Gender<select value={applicant.additionalDetails?.guarantorGender || ''} onChange={e => setApplicantExtra('guarantorGender', e.target.value)}><option value="">Select</option><option>Female</option><option>Male</option><option>Other</option></select></label>
-            <label>Guarantor Father's / Spouse Name<input value={applicant.additionalDetails?.guarantorFatherSpouse || ''} onChange={e => setApplicantExtra('guarantorFatherSpouse', e.target.value.replace(/[^A-Za-z .'-]/g, ''))} /></label>
-            <label>Guarantor Mother's Name<input value={applicant.additionalDetails?.guarantorMother || ''} onChange={e => setApplicantExtra('guarantorMother', e.target.value.replace(/[^A-Za-z .'-]/g, ''))} /></label>
-            <label>Guarantor Marital Status<select value={applicant.additionalDetails?.guarantorMaritalStatus || ''} onChange={e => setApplicantExtra('guarantorMaritalStatus', e.target.value)}><option value="">Select</option><option>Single</option><option>Married</option><option>Widowed</option><option>Divorced</option></select></label>
-            <label>Guarantor Nationality<input value={applicant.additionalDetails?.guarantorNationality || ''} onChange={e => setApplicantExtra('guarantorNationality', e.target.value.replace(/[^A-Za-z .'-]/g, ''))} /></label>
-            <label>Guarantor Aadhaar / KYC Document<input value={applicant.additionalDetails?.guarantorKycDocument || ''} onChange={e => setApplicantExtra('guarantorKycDocument', e.target.value)} /></label>
-            <label>Guarantor Alternate ID Type<select value={applicant.additionalDetails?.guarantorAlternateIdType || ''} onChange={e => setApplicantExtra('guarantorAlternateIdType', e.target.value)}><option value="">Select</option><option>Voter ID</option><option>Driving Licence</option><option>Passport</option></select></label>
-            <label>Guarantor Alternate ID Number<input value={applicant.additionalDetails?.guarantorAlternateIdNumber || ''} onChange={e => setApplicantExtra('guarantorAlternateIdNumber', e.target.value)} /></label>
-            <label>Guarantor Current Address (include landmark)<input value={applicant.additionalDetails?.guarantorCurrentAddress || ''} onChange={e => setApplicantExtra('guarantorCurrentAddress', e.target.value)} /></label>
-            <label>Guarantor Permanent Address<input value={applicant.additionalDetails?.guarantorPermanentAddress || ''} onChange={e => setApplicantExtra('guarantorPermanentAddress', e.target.value)} /></label>
-            <label>Guarantor City<input value={applicant.additionalDetails?.guarantorCity || ''} onChange={e => setApplicantExtra('guarantorCity', e.target.value)} /></label><label>Guarantor State<select value={applicant.additionalDetails?.guarantorState || ''} onChange={e => setApplicantExtra('guarantorState', e.target.value)}><option value="">Select state</option>{INDIA_STATES.map(state => <option key={state} value={state}>{state}</option>)}</select></label><label>Guarantor PIN Code<input inputMode="numeric" maxLength={6} value={applicant.additionalDetails?.guarantorPincode || ''} onChange={e => setApplicantExtra('guarantorPincode', e.target.value.replace(/\D/g,'').slice(0,6))} /></label>
-            <label>Guarantor Residence Type<select value={applicant.additionalDetails?.guarantorResidenceType || ''} onChange={e => setApplicantExtra('guarantorResidenceType', e.target.value)}><option value="">Select</option><option>Owned</option><option>Rented</option></select></label>
-            <label>Guarantor Years at Address<input type="number" min="0" value={applicant.additionalDetails?.guarantorYearsAtAddress || ''} onChange={e => setApplicantExtra('guarantorYearsAtAddress', e.target.value)} /></label>
-            <label>Guarantor Employer / Business<input value={applicant.additionalDetails?.guarantorEmployer || ''} onChange={e => setApplicantExtra('guarantorEmployer', e.target.value)} /></label>
-            <label>Guarantor Designation / User Type<input value={applicant.additionalDetails?.guarantorDesignation || ''} onChange={e => setApplicantExtra('guarantorDesignation', e.target.value.replace(/[^A-Za-z .'-]/g, ''))} /></label>
-            <label>Guarantor Years in Job / Business<input type="number" min="0" value={applicant.additionalDetails?.guarantorExperience || ''} onChange={e => setApplicantExtra('guarantorExperience', e.target.value)} /></label>
-            <label>Guarantor Monthly Income<input type="number" min="0" value={applicant.additionalDetails?.guarantorMonthlyIncome || ''} onChange={e => setApplicantExtra('guarantorMonthlyIncome', e.target.value)} /></label>
-            <label>Guarantor Annual Income<input type="number" min="0" value={applicant.additionalDetails?.guarantorAnnualIncome || ''} onChange={e => setApplicantExtra('guarantorAnnualIncome', e.target.value)} /></label>
-            <label>Guarantor Other Income<input type="number" min="0" value={applicant.additionalDetails?.guarantorOtherIncome || ''} onChange={e => setApplicantExtra('guarantorOtherIncome', e.target.value)} /></label>
-            <label>Guarantor Existing Obligations<input type="number" min="0" value={applicant.additionalDetails?.guarantorObligations || ''} onChange={e => setApplicantExtra('guarantorObligations', e.target.value)} /></label>
-            <label>Guarantor Account Holder<input value={applicant.additionalDetails?.guarantorAccountHolder || ''} onChange={e => setApplicantExtra('guarantorAccountHolder', e.target.value.replace(/[^A-Za-z .'-]/g, ''))} /></label>
-            <label>Guarantor Bank Account<input value={applicant.additionalDetails?.guarantorAccountNumber || ''} onChange={e => setApplicantExtra('guarantorAccountNumber', e.target.value.replace(/\D/g,''))} /></label>
-            <label>Guarantor IFSC<span className="ifsc-input-wrap"><input maxLength={11} value={applicant.additionalDetails?.guarantorIfsc || ''} onChange={e => setApplicantExtra('guarantorIfsc', e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))} /><button type="button" className="secondary ifsc-finder" onClick={() => void lookupIfsc('guarantor', applicant.additionalDetails?.guarantorIfsc || '', 'guarantorBank', 'guarantorBranch')}>Find IFSC</button></span>{ifscMessages.guarantor?.text && <small className={ifscMessages.guarantor.error ? 'field-error' : 'field-success'}>{ifscMessages.guarantor.text}</small>}</label>
-            <label>Guarantor Bank Name<input value={applicant.additionalDetails?.guarantorBank || ''} onChange={e => setApplicantExtra('guarantorBank', e.target.value)} /></label><label>Guarantor Branch<input value={applicant.additionalDetails?.guarantorBranch || ''} onChange={e => setApplicantExtra('guarantorBranch', e.target.value)} /></label><label>Guarantor Account Type<select value={applicant.additionalDetails?.guarantorAccountType || ''} onChange={e => setApplicantExtra('guarantorAccountType', e.target.value)}><option value="">Select</option><option>Savings</option><option>Current</option></select></label>
-            </div></section></div>
+            <label className="full-width checkbox-field inline-checkbox-field"><input type="checkbox" checked={guarantorEnabled} onChange={event => handleGuarantorToggle(event.target.checked)} />Add a guarantor</label>
+            {guarantorEnabled && <section className="full-width card form-card" aria-label="Guarantor Details"><h3>Guarantor Details</h3><div className="field-grid">
+            <label>Name<input required value={applicant.additionalDetails?.guarantorName || ''} onChange={e => setApplicantExtra('guarantorName', e.target.value.replace(/[^A-Za-z .'-]/g, ''))} />{applicant.additionalDetails?.guarantorName && !validName(applicant.additionalDetails.guarantorName) && <small className="field-error">Name should contain letters only.</small>}</label>
+            <label>Relationship<select required value={applicant.additionalDetails?.guarantorRelationship || ''} onChange={e => setApplicantExtra('guarantorRelationship', e.target.value)}><option value="">Select relationship</option><option>Spouse</option><option>Parent</option><option>Child</option><option>Sibling</option><option>Relative</option><option>Other</option></select></label>
+            <label>PAN<input required maxLength={10} pattern="[A-Za-z]{5}[0-9]{4}[A-Za-z]" value={applicant.additionalDetails?.guarantorPan || ''} onChange={e => setApplicantExtra('guarantorPan', e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))} />{applicant.additionalDetails?.guarantorPan && !validPan(applicant.additionalDetails.guarantorPan) && <small className="field-error">PAN should look like ABCDE1234F.</small>}</label>
+            <label>Mobile<span style={{ display: 'flex', alignItems: 'center', gap: 8 }}><span aria-label="Country code">+91</span><input required type="tel" inputMode="numeric" minLength={10} maxLength={10} pattern="[0-9]{10}" value={applicant.additionalDetails?.guarantorMobile || ''} onChange={e => setApplicantExtra('guarantorMobile', e.target.value.replace(/\D/g, '').slice(0, 10))} /></span></label>
+            <label>Email<input required type="email" value={applicant.additionalDetails?.guarantorEmail || ''} onChange={e => setApplicantExtra('guarantorEmail', e.target.value)} onBlur={() => setValidationMessage(applicant.additionalDetails?.guarantorEmail && !validEmail(applicant.additionalDetails.guarantorEmail) ? 'Enter a valid guarantor email address.' : '')} />{applicant.additionalDetails?.guarantorEmail && !validEmail(applicant.additionalDetails.guarantorEmail) && <small className="field-error">Enter a valid email address.</small>}</label>
+            <label className="full-width">Address<input required value={applicant.additionalDetails?.guarantorAddress || ''} onChange={e => setApplicantExtra('guarantorAddress', e.target.value)} /></label>
+            <label>KYC/Bureau Consent<select required value={applicant.additionalDetails?.guarantorConsent || 'false'} onChange={e => setApplicantExtra('guarantorConsent', e.target.value)}><option value="false">Not provided</option><option value="true">Consented</option></select></label>
+            <label>KYC Status<input readOnly value={applicant.additionalDetails?.guarantorKycStatus || 'Not started'} /></label>
+            <label>Date of Birth<input required type="date" max={new Date().toISOString().slice(0,10)} value={applicant.additionalDetails?.guarantorDob || ''} onChange={e => setApplicantExtra('guarantorDob', e.target.value)} /></label>
+            <label>Age<input readOnly value={calculateAge(applicant.additionalDetails?.guarantorDob || '')} /></label>
+            <label>Gender<select required value={applicant.additionalDetails?.guarantorGender || ''} onChange={e => setApplicantExtra('guarantorGender', e.target.value)}><option value="">Select</option><option>Female</option><option>Male</option><option>Other</option></select></label>
+            <label>Father's / Spouse Name<input required value={applicant.additionalDetails?.guarantorFatherSpouse || ''} onChange={e => setApplicantExtra('guarantorFatherSpouse', e.target.value.replace(/[^A-Za-z .'-]/g, ''))} /></label>
+            <label>Mother's Name<input required value={applicant.additionalDetails?.guarantorMother || ''} onChange={e => setApplicantExtra('guarantorMother', e.target.value.replace(/[^A-Za-z .'-]/g, ''))} /></label>
+            <label>Marital Status<select required value={applicant.additionalDetails?.guarantorMaritalStatus || ''} onChange={e => setApplicantExtra('guarantorMaritalStatus', e.target.value)}><option value="">Select</option><option>Single</option><option>Married</option><option>Widowed</option><option>Divorced</option></select></label>
+            <label>Nationality<input required value={applicant.additionalDetails?.guarantorNationality || ''} onChange={e => setApplicantExtra('guarantorNationality', e.target.value.replace(/[^A-Za-z .'-]/g, ''))} /></label>
+            <label>Aadhaar / KYC Document<input required value={applicant.additionalDetails?.guarantorKycDocument || ''} onChange={e => setApplicantExtra('guarantorKycDocument', e.target.value)} /></label>
+            <label>Alternate ID Type<select required value={applicant.additionalDetails?.guarantorAlternateIdType || ''} onChange={e => setApplicantExtra('guarantorAlternateIdType', e.target.value)}><option value="">Select</option><option>Voter ID</option><option>Driving Licence</option><option>Passport</option></select></label>
+            <label>Alternate ID Number<input required value={applicant.additionalDetails?.guarantorAlternateIdNumber || ''} onChange={e => setApplicantExtra('guarantorAlternateIdNumber', e.target.value)} /></label>
+            <label>Current Address<input required value={applicant.additionalDetails?.guarantorCurrentAddress || ''} onChange={e => setApplicantExtra('guarantorCurrentAddress', e.target.value)} /></label>
+            <label>Permanent Address<input required value={applicant.additionalDetails?.guarantorPermanentAddress || ''} onChange={e => setApplicantExtra('guarantorPermanentAddress', e.target.value)} /></label>
+            <label>City<input required value={applicant.additionalDetails?.guarantorCity || ''} onChange={e => setApplicantExtra('guarantorCity', e.target.value)} /></label>
+            <label>State<select required value={applicant.additionalDetails?.guarantorState || ''} onChange={e => setApplicantExtra('guarantorState', e.target.value)}><option value="">Select state</option>{INDIA_STATES.map(state => <option key={state} value={state}>{state}</option>)}</select></label>
+            <label>PIN Code<input required inputMode="numeric" minLength={6} maxLength={6} pattern="[1-9][0-9]{5}" value={applicant.additionalDetails?.guarantorPincode || ''} onChange={e => setApplicantExtra('guarantorPincode', e.target.value.replace(/\D/g, '').slice(0, 6))} /></label>
+            <label>Residence Type<select required value={applicant.additionalDetails?.guarantorResidenceType || ''} onChange={e => setApplicantExtra('guarantorResidenceType', e.target.value)}><option value="">Select</option><option>Owned</option><option>Rented</option></select></label>
+            <label>Years at Address<input required type="number" min="0" value={applicant.additionalDetails?.guarantorYearsAtAddress || ''} onChange={e => setApplicantExtra('guarantorYearsAtAddress', e.target.value)} /></label>
+            <label>Employer / Business<input required value={applicant.additionalDetails?.guarantorEmployer || ''} onChange={e => setApplicantExtra('guarantorEmployer', e.target.value)} /></label>
+            <label>Designation / User Type<input required value={applicant.additionalDetails?.guarantorDesignation || ''} onChange={e => setApplicantExtra('guarantorDesignation', e.target.value.replace(/[^A-Za-z .'-]/g, ''))} /></label>
+            <label>Years in Job / Business<input required type="number" min="0" value={applicant.additionalDetails?.guarantorExperience || ''} onChange={e => setApplicantExtra('guarantorExperience', e.target.value)} /></label>
+            <label>Monthly Income<input required type="number" min="0" value={applicant.additionalDetails?.guarantorMonthlyIncome || ''} onChange={e => setApplicantExtra('guarantorMonthlyIncome', e.target.value)} /></label>
+            <label>Annual Income<input required type="number" min="0" value={applicant.additionalDetails?.guarantorAnnualIncome || ''} onChange={e => setApplicantExtra('guarantorAnnualIncome', e.target.value)} /></label>
+            <label>Other Income<input required type="number" min="0" value={applicant.additionalDetails?.guarantorOtherIncome || ''} onChange={e => setApplicantExtra('guarantorOtherIncome', e.target.value)} /></label>
+            <label>Account Holder<input required value={applicant.additionalDetails?.guarantorAccountHolder || ''} onChange={e => setApplicantExtra('guarantorAccountHolder', e.target.value.replace(/[^A-Za-z .'-]/g, ''))} /></label>
+            <label>Bank Account<input required inputMode="numeric" value={applicant.additionalDetails?.guarantorAccountNumber || ''} onChange={e => setApplicantExtra('guarantorAccountNumber', e.target.value.replace(/\D/g, ''))} /></label>
+            <label>IFSC<span className="ifsc-input-wrap"><input required maxLength={11} pattern="[A-Za-z]{4}0[A-Za-z0-9]{6}" value={applicant.additionalDetails?.guarantorIfsc || ''} onChange={e => setApplicantExtra('guarantorIfsc', e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))} onBlur={() => {
+              const code = applicant.additionalDetails?.guarantorIfsc || '';
+              setIfscMessages(prev => ({ ...prev, guarantor: code && !/^[A-Z]{4}0[A-Z0-9]{6}$/.test(code) ? { text: 'IFSC must be 11 characters, e.g. ABCD0123456.', error: true } : { text: '', error: false } }));
+            }} /><button type="button" className="secondary ifsc-finder" onClick={() => void lookupIfsc('guarantor', applicant.additionalDetails?.guarantorIfsc || '', 'guarantorBank', 'guarantorBranch')}>Find IFSC</button></span>{ifscMessages.guarantor?.text && <small className={ifscMessages.guarantor.error ? 'field-error' : 'field-success'}>{ifscMessages.guarantor.text}</small>}</label>
+            <label>Bank Name<input required value={applicant.additionalDetails?.guarantorBank || ''} onChange={e => setApplicantExtra('guarantorBank', e.target.value)} /></label>
+            <label>Branch<input required value={applicant.additionalDetails?.guarantorBranch || ''} onChange={e => setApplicantExtra('guarantorBranch', e.target.value)} /></label>
+            <label>Account Type<select required value={applicant.additionalDetails?.guarantorAccountType || ''} onChange={e => setApplicantExtra('guarantorAccountType', e.target.value)}><option value="">Select</option><option>Savings</option><option>Current</option></select></label>
+            </div></section>}
+            </div>
           </div>
         </section>
 
