@@ -539,11 +539,6 @@ public class LoanApplicationService {
         LoanApplication application = getById(applicationId);
         validateCompleteApplication(application);
         var extraApplicant = application.getApplicant().getAdditionalDetails();
-        if (extraApplicant != null && "true".equalsIgnoreCase(extraApplicant.get("coApplicantRequired"))
-                && extraApplicant.get("coApplicantName") != null && !extraApplicant.get("coApplicantName").isBlank()
-                && !"true".equalsIgnoreCase(extraApplicant.get("coApplicantConsent"))) {
-            throw new IllegalArgumentException("Separate KYC and bureau consent is required for the co-applicant.");
-        }
         if (extraApplicant != null && extraApplicant.get("guarantorName") != null && !extraApplicant.get("guarantorName").isBlank()
                 && !"true".equalsIgnoreCase(extraApplicant.get("guarantorConsent"))) {
             throw new IllegalArgumentException("Separate KYC and bureau consent is required for the guarantor.");

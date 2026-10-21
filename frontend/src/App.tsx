@@ -77,7 +77,7 @@ const initialApplicant: Applicant = {
   city: '',
   state: '',
   pincode: '',
-  additionalDetails: { nationality: '', residentialStatus: '', maritalStatus: '', gender: '', fatherName: '', motherName: '', spouseName: '', education: '', alternateMobile: '', aadhaarNumber: '', alternateIdType: '', alternateIdNumber: '', currentResidenceType: '', yearsAtAddress: '', monthlyRent: '', permanentAddress: '', sameAsCurrentAddress: 'true', addressProofType: '', accountHolderName: '', accountNumber: '', ifscCode: '', bankName: '', bankBranch: '', accountType: '', salaryAccount: '', coApplicantName: '', coApplicantRelationship: '', coApplicantType: '', coApplicantPan: '', coApplicantMobile: '', coApplicantEmail: '', coApplicantAddress: '', coApplicantConsent: 'false', guarantorName: '', guarantorRelationship: '', guarantorPan: '', guarantorMobile: '', guarantorEmail: '', guarantorAddress: '', guarantorConsent: 'false' }
+  additionalDetails: { nationality: '', residentialStatus: '', maritalStatus: '', gender: '', fatherName: '', motherName: '', spouseName: '', education: '', alternateMobile: '', aadhaarNumber: '', alternateIdType: '', alternateIdNumber: '', currentResidenceType: '', yearsAtAddress: '', monthlyRent: '', permanentAddress: '', sameAsCurrentAddress: 'true', addressProofType: '', accountHolderName: '', accountNumber: '', ifscCode: '', bankName: '', bankBranch: '', accountType: '', salaryAccount: '', coApplicantName: '', coApplicantRelationship: '', coApplicantType: '', coApplicantPan: '', coApplicantMobile: '', coApplicantEmail: '', coApplicantAddress: '', guarantorName: '', guarantorRelationship: '', guarantorPan: '', guarantorMobile: '', guarantorEmail: '', guarantorAddress: '', guarantorConsent: 'false' }
 };
 
 const initialEmployment: Employment = {
@@ -239,6 +239,8 @@ function App() {
   const [identityFetched, setIdentityFetched] = useState<IdentityFields>({});
   const identityRequestRef = useRef<AbortController | null>(null);
   const identityFileRef = useRef<HTMLInputElement | null>(null);
+  const coApplicantSectionRef = useRef<HTMLElement | null>(null);
+  const shouldScrollToCoApplicantRef = useRef(false);
   const [applicantMobileError, setApplicantMobileError] = useState('');
   const [employment, setEmployment] = useState<Employment>(initialEmployment);
   const [loanDetails, setLoanDetails] = useState<LoanDetails>(initialLoanDetails);
@@ -273,6 +275,12 @@ function App() {
   const [validationMessage, setValidationMessage] = useState('');
   const [saveIndicator, setSaveIndicator] = useState('');
   const [selectedFiles, setSelectedFiles] = useState<Record<DocumentType, string>>(() => Object.fromEntries(Object.keys(createInitialDocuments()).map((key) => [key, ''])) as Record<DocumentType, string>);
+
+  useEffect(() => {
+    if (!shouldScrollToCoApplicantRef.current || applicant.additionalDetails?.coApplicantRequired !== 'true') return;
+    shouldScrollToCoApplicantRef.current = false;
+    coApplicantSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [applicant.additionalDetails?.coApplicantRequired]);
 
   const apiFetch = async (input: RequestInfo | URL, init: RequestInit = {}) => {
     const authSession = readStoredAuth();
@@ -872,7 +880,7 @@ function App() {
       if (!applicant.fullName || !validName(applicant.fullName)) { setValidationMessage('Enter a valid full name using letters only.'); return; }
       if (!validPan(applicant.panNumber)) { setValidationMessage('PAN should look like ABCDE1234F.'); return; }
       if (!validEmail(applicant.email) || !applicant.workEmail || !validEmail(applicant.workEmail)) { setValidationMessage('Enter valid personal and work email addresses.'); return; }
-      const extraEmails = [employment.additionalDetails?.officialEmail, employment.additionalDetails?.businessEmail, applicant.additionalDetails?.coApplicantEmail, applicant.additionalDetails?.coApplicantWorkEmail, applicant.additionalDetails?.guarantorEmail].filter((value): value is string => Boolean(value));
+      const extraEmails = [employment.additionalDetails?.officialEmail, employment.additionalDetails?.businessEmail, ...(applicant.additionalDetails?.coApplicantRequired === 'true' ? [applicant.additionalDetails?.coApplicantEmail, applicant.additionalDetails?.coApplicantWorkEmail] : []), applicant.additionalDetails?.guarantorEmail].filter((value): value is string => Boolean(value));
       if (extraEmails.some(value => !validEmail(value))) { setValidationMessage('Correct the employer, business, co-applicant or guarantor email format before submission.'); return; }
       if (!/^[1-9][0-9]{5}$/.test(applicant.pincode)) { setValidationMessage('PIN code must be a valid 6-digit Indian PIN code.'); return; }
       const suppliedIfscs = [applicant.additionalDetails?.ifscCode, ...(applicant.additionalDetails?.coApplicantRequired === 'true' ? [applicant.additionalDetails?.coApplicantIfsc] : []), applicant.additionalDetails?.guarantorIfsc].filter((value): value is string => Boolean(value));
@@ -1101,6 +1109,51 @@ function App() {
     setCurrentStep(1); setHighestUnlockedStep(1); setValidationMessage('');
   };
   const setApplicantExtra = (key: string, value: string) => setApplicant(prev => ({ ...prev, additionalDetails: { ...(prev.additionalDetails || {}), [key]: value } }));
+  const handleCoApplicantToggle = (checked: boolean) => {
+    if (checked) {
+      shouldScrollToCoApplicantRef.current = true;
+      setApplicantExtra('coApplicantRequired', 'true');
+      return;
+    }
+
+    const coApplicantDetails = applicant.additionalDetails || {};
+    const hasEnteredData = Object.entries(coApplicantDetails).some(([key, value]) =>
+      key.startsWith('coApplicant')
+      && key !== 'coApplicantRequired'
+      && value.trim().length > 0
+      && value !== 'false'
+      && value !== 'Not started'
+    );
+    if (hasEnteredData && !window.confirm('Unchecking this box will remove the co-applicant details you entered. Continue?')) return;
+
+    setApplicant(previous => {
+      const additionalDetails = { ...(previous.additionalDetails || {}) };
+      Object.keys(additionalDetails).forEach(key => {
+        if (key.startsWith('coApplicant') && key !== 'coApplicantRequired') delete additionalDetails[key];
+      });
+      additionalDetails.coApplicantRequired = 'false';
+      return { ...previous, additionalDetails };
+    });
+    setIfscMessages(previous => ({ ...previous, coApplicant: { text: '', error: false } }));
+    setValidationMessage(previous => {
+      if ([
+        'Enter the co-applicant name or uncheck Include a co-applicant.',
+        'Co-applicant name must contain letters only.',
+        'Co-applicant PAN should look like ABCDE1234F.',
+        'Enter a valid co-applicant email address.',
+        'Enter a valid co-applicant work email address.'
+      ].includes(previous)) return '';
+      if (previous === 'Correct the employer, business, co-applicant or guarantor email format before submission.') {
+        const otherEmails = [employment.additionalDetails?.officialEmail, employment.additionalDetails?.businessEmail, applicant.additionalDetails?.guarantorEmail].filter((value): value is string => Boolean(value));
+        if (!otherEmails.some(value => !validEmail(value))) return '';
+      }
+      if (previous === 'Correct the IFSC code format. IFSC must contain 11 characters, for example ABCD0123456.') {
+        const otherIfscs = [applicant.additionalDetails?.ifscCode, applicant.additionalDetails?.guarantorIfsc].filter((value): value is string => Boolean(value));
+        if (!otherIfscs.some(value => !/^[A-Z]{4}0[A-Z0-9]{6}$/.test(value))) return '';
+      }
+      return previous;
+    });
+  };
   const setEmploymentExtra = (key: string, value: string) => setEmployment(prev => ({ ...prev, additionalDetails: { ...(prev.additionalDetails || {}), [key]: value } }));
   const setLoanExtra = (key: string, value: string) => setLoanDetails(prev => ({ ...prev, additionalDetails: { ...(prev.additionalDetails || {}), [key]: value } }));
   const lookupIfsc = async (fieldKey: string, ifscValue: string, bankKey: string, branchKey: string) => {
@@ -1308,48 +1361,44 @@ function App() {
             <label>Account Type<select value={applicant.additionalDetails?.accountType || ''} onChange={e => setApplicantExtra('accountType', e.target.value)}><option value="">Select</option><option>Savings</option><option>Current</option></select></label>
             <label>Salary Account<select value={applicant.additionalDetails?.salaryAccount || ''} onChange={e => setApplicantExtra('salaryAccount', e.target.value)}><option value="">Select</option><option>Yes</option><option>No</option></select></label>
             </div></section>
-            <section className="card form-card" aria-label="Co-applicant details"><h3>Co-applicant details</h3><div className="field-grid">
-            <label className="full-width checkbox-field inline-checkbox-field"><input type="checkbox" checked={applicant.additionalDetails?.coApplicantRequired === 'true'} onChange={e => setApplicantExtra('coApplicantRequired', String(e.target.checked))} /> Include a co-applicant</label>
-            {applicant.additionalDetails?.coApplicantRequired === 'true' && <>
-            <label>Co-applicant Name<input value={applicant.additionalDetails?.coApplicantName || ''} onChange={e => setApplicantExtra('coApplicantName', e.target.value.replace(/[^A-Za-z .'-]/g, ''))} /></label>
-            <label>Co-applicant Relationship<input value={applicant.additionalDetails?.coApplicantRelationship || ''} onChange={e => setApplicantExtra('coApplicantRelationship', e.target.value.replace(/[^A-Za-z .'-]/g, ''))} /></label>
-            <label>Co-applicant Type<select value={applicant.additionalDetails?.coApplicantType || ''} onChange={e => setApplicantExtra('coApplicantType', e.target.value)}><option value="">Select</option><option>Earning</option><option>Non-earning</option></select></label>
-            <label>Co-applicant Monthly Income<input type="number" min="0" value={applicant.additionalDetails?.coApplicantIncome || ''} onChange={e => setApplicantExtra('coApplicantIncome', e.target.value)} /></label>
-            <label>Co-applicant Existing Obligations<input type="number" min="0" value={applicant.additionalDetails?.coApplicantObligations || ''} onChange={e => setApplicantExtra('coApplicantObligations', e.target.value)} /></label>
-            <label>Co-applicant PAN<input maxLength={10} value={applicant.additionalDetails?.coApplicantPan || ''} onChange={e => setApplicantExtra('coApplicantPan', e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))} />{applicant.additionalDetails?.coApplicantPan && !validPan(applicant.additionalDetails.coApplicantPan) && <small className="field-error">PAN should look like ABCDE1234F.</small>}</label>
-            <label>Co-applicant Mobile<input inputMode="numeric" maxLength={10} value={applicant.additionalDetails?.coApplicantMobile || ''} onChange={e => setApplicantExtra('coApplicantMobile', e.target.value.replace(/\D/g,'').slice(0,10))} /></label>
-            <label>Co-applicant Email<input type="email" value={applicant.additionalDetails?.coApplicantEmail || ''} onChange={e => setApplicantExtra('coApplicantEmail', e.target.value)} onBlur={() => setValidationMessage(applicant.additionalDetails?.coApplicantEmail && !validEmail(applicant.additionalDetails.coApplicantEmail) ? 'Enter a valid co-applicant email address.' : '')} />{applicant.additionalDetails?.coApplicantEmail && !validEmail(applicant.additionalDetails.coApplicantEmail) && <small className="field-error">Enter a valid co-applicant email address.</small>}</label>
-            <label className="full-width">Co-applicant Address<input value={applicant.additionalDetails?.coApplicantAddress || ''} onChange={e => setApplicantExtra('coApplicantAddress', e.target.value)} /></label>
-            <label>Co-applicant KYC/Bureau Consent<select value={applicant.additionalDetails?.coApplicantConsent || 'false'} onChange={e => setApplicantExtra('coApplicantConsent', e.target.value)}><option value="false">Not provided</option><option value="true">Consented</option></select></label><label>Co-applicant KYC Status<input readOnly value={applicant.additionalDetails?.coApplicantKycStatus || 'Not started'} /></label>
-            </>}
-            {applicant.additionalDetails?.coApplicantRequired === 'true' && <>
-            <label>Co-applicant Date of Birth<input type="date" max={new Date().toISOString().slice(0,10)} value={applicant.additionalDetails?.coApplicantDob || ''} onChange={e => setApplicantExtra('coApplicantDob', e.target.value)} /></label>
-            <label>Co-applicant Age<input readOnly value={calculateAge(applicant.additionalDetails?.coApplicantDob || '')} /></label>
-            <label>Co-applicant Gender<select value={applicant.additionalDetails?.coApplicantGender || ''} onChange={e => setApplicantExtra('coApplicantGender', e.target.value)}><option value="">Select</option><option>Female</option><option>Male</option><option>Other</option></select></label>
-            <label>Co-applicant Father's Name<input value={applicant.additionalDetails?.coApplicantFather || ''} onChange={e => setApplicantExtra('coApplicantFather', e.target.value.replace(/[^A-Za-z .'-]/g, ''))} /></label>
-            <label>Co-applicant Mother's Name<input value={applicant.additionalDetails?.coApplicantMother || ''} onChange={e => setApplicantExtra('coApplicantMother', e.target.value.replace(/[^A-Za-z .'-]/g, ''))} /></label>
-            <label>Co-applicant Spouse Name<input value={applicant.additionalDetails?.coApplicantSpouse || ''} onChange={e => setApplicantExtra('coApplicantSpouse', e.target.value.replace(/[^A-Za-z .'-]/g, ''))} /></label>
-            <label>Co-applicant Marital Status<select value={applicant.additionalDetails?.coApplicantMaritalStatus || ''} onChange={e => setApplicantExtra('coApplicantMaritalStatus', e.target.value)}><option value="">Select</option><option>Single</option><option>Married</option><option>Widowed</option><option>Divorced</option></select></label>
-            <label>Co-applicant Nationality<input value={applicant.additionalDetails?.coApplicantNationality || ''} onChange={e => setApplicantExtra('coApplicantNationality', e.target.value.replace(/[^A-Za-z .'-]/g, ''))} /></label>
-            <label>Co-applicant Residential Status<select value={applicant.additionalDetails?.coApplicantResidentialStatus || ''} onChange={e => setApplicantExtra('coApplicantResidentialStatus', e.target.value)}><option value="">Select</option><option value="Resident">Resident</option><option value="Non-Resident">Non-Resident</option><option value="NRI">NRI</option></select></label>
-            <label>Co-applicant Education<input value={applicant.additionalDetails?.coApplicantEducation || ''} onChange={e => setApplicantExtra('coApplicantEducation', e.target.value)} /></label>
-            <label>Co-applicant Aadhaar / KYC Document<input value={applicant.additionalDetails?.coApplicantKycDocument || ''} onChange={e => setApplicantExtra('coApplicantKycDocument', e.target.value)} /></label>
-            <label>Co-applicant Alternate ID Type<select value={applicant.additionalDetails?.coApplicantAlternateIdType || ''} onChange={e => setApplicantExtra('coApplicantAlternateIdType', e.target.value)}><option value="">Select</option><option>Voter ID</option><option>Driving Licence</option><option>Passport</option></select></label>
-            <label>Co-applicant Alternate ID Number<input value={applicant.additionalDetails?.coApplicantAlternateIdNumber || ''} onChange={e => setApplicantExtra('coApplicantAlternateIdNumber', e.target.value)} /></label>
-            <label>Co-applicant Work Email<input type="email" value={applicant.additionalDetails?.coApplicantWorkEmail || ''} onChange={e => setApplicantExtra('coApplicantWorkEmail', e.target.value)} onBlur={() => setValidationMessage(applicant.additionalDetails?.coApplicantWorkEmail && !validEmail(applicant.additionalDetails.coApplicantWorkEmail) ? 'Enter a valid co-applicant work email address.' : '')} />{applicant.additionalDetails?.coApplicantWorkEmail && !validEmail(applicant.additionalDetails.coApplicantWorkEmail) && <small className="field-error">Enter a valid work email address.</small>}</label>
-            <label>Co-applicant Current Address<input value={applicant.additionalDetails?.coApplicantCurrentAddress || ''} onChange={e => setApplicantExtra('coApplicantCurrentAddress', e.target.value)} /></label>
-            <label>Co-applicant Permanent Address<input value={applicant.additionalDetails?.coApplicantPermanentAddress || ''} onChange={e => setApplicantExtra('coApplicantPermanentAddress', e.target.value)} /></label>
-            <label>Co-applicant City<input value={applicant.additionalDetails?.coApplicantCity || ''} onChange={e => setApplicantExtra('coApplicantCity', e.target.value)} /></label>
-            <label>Co-applicant State<select value={applicant.additionalDetails?.coApplicantState || ''} onChange={e => setApplicantExtra('coApplicantState', e.target.value)}><option value="">Select state</option>{INDIA_STATES.map(state => <option key={state} value={state}>{state}</option>)}</select></label>
-            <label>Co-applicant PIN Code<input inputMode="numeric" maxLength={6} value={applicant.additionalDetails?.coApplicantPincode || ''} onChange={e => setApplicantExtra('coApplicantPincode', e.target.value.replace(/\D/g,'').slice(0,6))} /></label>
-            <label>Co-applicant Residence Type<select value={applicant.additionalDetails?.coApplicantResidenceType || ''} onChange={e => setApplicantExtra('coApplicantResidenceType', e.target.value)}><option value="">Select</option><option>Owned</option><option>Rented</option></select></label>
-            <label>Co-applicant Years at Address<input type="number" min="0" value={applicant.additionalDetails?.coApplicantYearsAtAddress || ''} onChange={e => setApplicantExtra('coApplicantYearsAtAddress', e.target.value)} /></label>
-            <label>Co-applicant Account Holder<input value={applicant.additionalDetails?.coApplicantAccountHolder || ''} onChange={e => setApplicantExtra('coApplicantAccountHolder', e.target.value.replace(/[^A-Za-z .'-]/g, ''))} /></label>
-            <label>Co-applicant Bank Account<input value={applicant.additionalDetails?.coApplicantAccountNumber || ''} onChange={e => setApplicantExtra('coApplicantAccountNumber', e.target.value.replace(/\D/g,''))} /></label>
-            <label>Co-applicant IFSC<span className="ifsc-input-wrap"><input maxLength={11} value={applicant.additionalDetails?.coApplicantIfsc || ''} onChange={e => setApplicantExtra('coApplicantIfsc', e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))} /><button type="button" className="secondary ifsc-finder" onClick={() => void lookupIfsc('coApplicant', applicant.additionalDetails?.coApplicantIfsc || '', 'coApplicantBank', 'coApplicantBranch')}>Find IFSC</button></span>{ifscMessages.coApplicant?.text && <small className={ifscMessages.coApplicant.error ? 'field-error' : 'field-success'}>{ifscMessages.coApplicant.text}</small>}</label>
-            <label>Co-applicant Bank Name<input value={applicant.additionalDetails?.coApplicantBank || ''} onChange={e => setApplicantExtra('coApplicantBank', e.target.value)} /></label><label>Co-applicant Branch<input value={applicant.additionalDetails?.coApplicantBranch || ''} onChange={e => setApplicantExtra('coApplicantBranch', e.target.value)} /></label><label>Co-applicant Account Type<select value={applicant.additionalDetails?.coApplicantAccountType || ''} onChange={e => setApplicantExtra('coApplicantAccountType', e.target.value)}><option value="">Select</option><option>Savings</option><option>Current</option></select></label>
-            </>}
-            </div></section>
+            <label className="full-width checkbox-field inline-checkbox-field"><input type="checkbox" checked={applicant.additionalDetails?.coApplicantRequired === 'true'} onChange={event => handleCoApplicantToggle(event.target.checked)} />Add a co-applicant</label>
+            {applicant.additionalDetails?.coApplicantRequired === 'true' && <section ref={coApplicantSectionRef} className="full-width card form-card" aria-label="Co-applicant Details"><h3>Co-applicant Details</h3><div className="field-grid">
+            <label>Name<input value={applicant.additionalDetails?.coApplicantName || ''} onChange={e => setApplicantExtra('coApplicantName', e.target.value.replace(/[^A-Za-z .'-]/g, ''))} /></label>
+            <label>Relationship<input value={applicant.additionalDetails?.coApplicantRelationship || ''} onChange={e => setApplicantExtra('coApplicantRelationship', e.target.value.replace(/[^A-Za-z .'-]/g, ''))} /></label>
+            <label>Type<select value={applicant.additionalDetails?.coApplicantType || ''} onChange={e => setApplicantExtra('coApplicantType', e.target.value)}><option value="">Select</option><option>Earning</option><option>Non-earning</option></select></label>
+            <label>Monthly Income<input type="number" min="0" value={applicant.additionalDetails?.coApplicantIncome || ''} onChange={e => setApplicantExtra('coApplicantIncome', e.target.value)} /></label>
+            <label>PAN<input maxLength={10} value={applicant.additionalDetails?.coApplicantPan || ''} onChange={e => setApplicantExtra('coApplicantPan', e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))} />{applicant.additionalDetails?.coApplicantPan && !validPan(applicant.additionalDetails.coApplicantPan) && <small className="field-error">PAN should look like ABCDE1234F.</small>}</label>
+            <label>Mobile<input inputMode="numeric" maxLength={10} value={applicant.additionalDetails?.coApplicantMobile || ''} onChange={e => setApplicantExtra('coApplicantMobile', e.target.value.replace(/\D/g,'').slice(0,10))} /></label>
+            <label>Email<input type="email" value={applicant.additionalDetails?.coApplicantEmail || ''} onChange={e => setApplicantExtra('coApplicantEmail', e.target.value)} onBlur={() => setValidationMessage(applicant.additionalDetails?.coApplicantEmail && !validEmail(applicant.additionalDetails.coApplicantEmail) ? 'Enter a valid co-applicant email address.' : '')} />{applicant.additionalDetails?.coApplicantEmail && !validEmail(applicant.additionalDetails.coApplicantEmail) && <small className="field-error">Enter a valid co-applicant email address.</small>}</label>
+            <label className="full-width">Address<input value={applicant.additionalDetails?.coApplicantAddress || ''} onChange={e => setApplicantExtra('coApplicantAddress', e.target.value)} /></label>
+            <label>Date of Birth<input type="date" max={new Date().toISOString().slice(0,10)} value={applicant.additionalDetails?.coApplicantDob || ''} onChange={e => setApplicantExtra('coApplicantDob', e.target.value)} /></label>
+            <label>Age<input readOnly value={calculateAge(applicant.additionalDetails?.coApplicantDob || '')} /></label>
+            <label>Gender<select value={applicant.additionalDetails?.coApplicantGender || ''} onChange={e => setApplicantExtra('coApplicantGender', e.target.value)}><option value="">Select</option><option>Female</option><option>Male</option><option>Other</option></select></label>
+            <label>Father's Name<input value={applicant.additionalDetails?.coApplicantFather || ''} onChange={e => setApplicantExtra('coApplicantFather', e.target.value.replace(/[^A-Za-z .'-]/g, ''))} /></label>
+            <label>Mother's Name<input value={applicant.additionalDetails?.coApplicantMother || ''} onChange={e => setApplicantExtra('coApplicantMother', e.target.value.replace(/[^A-Za-z .'-]/g, ''))} /></label>
+            <label>Spouse Name<input value={applicant.additionalDetails?.coApplicantSpouse || ''} onChange={e => setApplicantExtra('coApplicantSpouse', e.target.value.replace(/[^A-Za-z .'-]/g, ''))} /></label>
+            <label>Marital Status<select value={applicant.additionalDetails?.coApplicantMaritalStatus || ''} onChange={e => setApplicantExtra('coApplicantMaritalStatus', e.target.value)}><option value="">Select</option><option>Single</option><option>Married</option><option>Widowed</option><option>Divorced</option></select></label>
+            <label>Nationality<input value={applicant.additionalDetails?.coApplicantNationality || ''} onChange={e => setApplicantExtra('coApplicantNationality', e.target.value.replace(/[^A-Za-z .'-]/g, ''))} /></label>
+            <label>Residential Status<select value={applicant.additionalDetails?.coApplicantResidentialStatus || ''} onChange={e => setApplicantExtra('coApplicantResidentialStatus', e.target.value)}><option value="">Select</option><option value="Resident">Resident</option><option value="Non-Resident">Non-Resident</option><option value="NRI">NRI</option></select></label>
+            <label>Education<select value={applicant.additionalDetails?.coApplicantEducation || ''} onChange={e => setApplicantExtra('coApplicantEducation', e.target.value)}><option value="">Select</option><option>Below 10th</option><option>10th Pass</option><option>12th Pass</option><option>Diploma</option><option>Graduate</option><option>Postgraduate</option><option>Doctorate</option><option>Other</option></select></label>
+            <label>Aadhaar / KYC Document<input value={applicant.additionalDetails?.coApplicantKycDocument || ''} onChange={e => setApplicantExtra('coApplicantKycDocument', e.target.value)} /></label>
+            <label>Alternate ID Type<select value={applicant.additionalDetails?.coApplicantAlternateIdType || ''} onChange={e => setApplicantExtra('coApplicantAlternateIdType', e.target.value)}><option value="">Select</option><option>Voter ID</option><option>Driving Licence</option><option>Passport</option></select></label>
+            <label>Alternate ID Number<input value={applicant.additionalDetails?.coApplicantAlternateIdNumber || ''} onChange={e => setApplicantExtra('coApplicantAlternateIdNumber', e.target.value)} /></label>
+            <label>Work Email<input type="email" value={applicant.additionalDetails?.coApplicantWorkEmail || ''} onChange={e => setApplicantExtra('coApplicantWorkEmail', e.target.value)} onBlur={() => setValidationMessage(applicant.additionalDetails?.coApplicantWorkEmail && !validEmail(applicant.additionalDetails.coApplicantWorkEmail) ? 'Enter a valid co-applicant work email address.' : '')} />{applicant.additionalDetails?.coApplicantWorkEmail && !validEmail(applicant.additionalDetails.coApplicantWorkEmail) && <small className="field-error">Enter a valid work email address.</small>}</label>
+            <label>Current Address<input value={applicant.additionalDetails?.coApplicantCurrentAddress || ''} onChange={e => setApplicantExtra('coApplicantCurrentAddress', e.target.value)} /></label>
+            <label>Permanent Address<input value={applicant.additionalDetails?.coApplicantPermanentAddress || ''} onChange={e => setApplicantExtra('coApplicantPermanentAddress', e.target.value)} /></label>
+            <label>City<input value={applicant.additionalDetails?.coApplicantCity || ''} onChange={e => setApplicantExtra('coApplicantCity', e.target.value)} /></label>
+            <label>State<select value={applicant.additionalDetails?.coApplicantState || ''} onChange={e => setApplicantExtra('coApplicantState', e.target.value)}><option value="">Select state</option>{INDIA_STATES.map(state => <option key={state} value={state}>{state}</option>)}</select></label>
+            <label>PIN Code<input inputMode="numeric" maxLength={6} value={applicant.additionalDetails?.coApplicantPincode || ''} onChange={e => setApplicantExtra('coApplicantPincode', e.target.value.replace(/\D/g,'').slice(0,6))} /></label>
+            <label>Residence Type<select value={applicant.additionalDetails?.coApplicantResidenceType || ''} onChange={e => setApplicantExtra('coApplicantResidenceType', e.target.value)}><option value="">Select</option><option>Owned</option><option>Rented</option></select></label>
+            <label>Years at Address<input type="number" min="0" value={applicant.additionalDetails?.coApplicantYearsAtAddress || ''} onChange={e => setApplicantExtra('coApplicantYearsAtAddress', e.target.value)} /></label>
+            <label>Account Holder<input value={applicant.additionalDetails?.coApplicantAccountHolder || ''} onChange={e => setApplicantExtra('coApplicantAccountHolder', e.target.value.replace(/[^A-Za-z .'-]/g, ''))} /></label>
+            <label>Bank Account<input value={applicant.additionalDetails?.coApplicantAccountNumber || ''} onChange={e => setApplicantExtra('coApplicantAccountNumber', e.target.value.replace(/\D/g,''))} /></label>
+            <label>IFSC<span className="ifsc-input-wrap"><input maxLength={11} value={applicant.additionalDetails?.coApplicantIfsc || ''} onChange={e => setApplicantExtra('coApplicantIfsc', e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))} /><button type="button" className="secondary ifsc-finder" onClick={() => void lookupIfsc('coApplicant', applicant.additionalDetails?.coApplicantIfsc || '', 'coApplicantBank', 'coApplicantBranch')}>Find IFSC</button></span>{ifscMessages.coApplicant?.text && <small className={ifscMessages.coApplicant.error ? 'field-error' : 'field-success'}>{ifscMessages.coApplicant.text}</small>}</label>
+            <label>Bank Name<input value={applicant.additionalDetails?.coApplicantBank || ''} onChange={e => setApplicantExtra('coApplicantBank', e.target.value)} /></label>
+            <label>Branch<input value={applicant.additionalDetails?.coApplicantBranch || ''} onChange={e => setApplicantExtra('coApplicantBranch', e.target.value)} /></label>
+            <label>Account Type<select value={applicant.additionalDetails?.coApplicantAccountType || ''} onChange={e => setApplicantExtra('coApplicantAccountType', e.target.value)}><option value="">Select</option><option>Savings</option><option>Current</option></select></label>
+            </div></section>}
             <section className="card form-card" aria-label="Guarantor details"><h3>Guarantor details</h3><div className="field-grid">
             <label>Guarantor Name (if required)<input value={applicant.additionalDetails?.guarantorName || ''} onChange={e => setApplicantExtra('guarantorName', e.target.value.replace(/[^A-Za-z .'-]/g, ''))} /></label>
             <label>Guarantor Relationship<input value={applicant.additionalDetails?.guarantorRelationship || ''} onChange={e => setApplicantExtra('guarantorRelationship', e.target.value.replace(/[^A-Za-z .'-]/g, ''))} /></label>
