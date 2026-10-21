@@ -2,6 +2,7 @@
 import { UnderwritingWorkspace } from './UnderwritingWorkspace';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { LoginPage } from './LoginPage';
+import { canUseLocalCreditFallback, creditServiceError, CreditServiceUnavailableError, withDevelopmentTimeout } from './creditDevelopment';
 import { buildAuthHeaders, clearAuth, readStoredAuth, type AuthSession } from './auth';
 import { ALLOWED_FILE_TYPES, MAX_FILE_SIZE, maskAadhaar, maskAadhaarEntry, editAadhaarEntry, mockIdentityFields, readIdentityFields, validateIdentity, validateIdentityFile, type IdentityFields, type IdentityField, type IdentityType } from './identity';
 
@@ -17,6 +18,11 @@ type Applicant = {
   state: string;
   pincode: string;
   additionalDetails?: Record<string, string>;
+};
+
+const formatIndianIncome = (value: number | string) => {
+  const digits = String(value ?? '').replace(/\D/g, '');
+  return digits ? Number(digits).toLocaleString('en-IN') : '';
 };
 
 type Employment = {
@@ -81,7 +87,7 @@ const initialApplicant: Applicant = {
 };
 
 const initialEmployment: Employment = {
-  employmentType: 'SALARIED',
+  employmentType: '',
   employerName: '',
   designation: '',
   totalWorkExperienceYears: '',
@@ -91,10 +97,19 @@ const initialEmployment: Employment = {
   additionalDetails: { employerAddress: '', officialEmail: '', employeeId: '', employmentContractType: '', employerCategory: '', totalAnnualIncome: '', salaryCreditMode: '', otherIncome: '0', profession: '', qualification: '', practiceBusinessName: '', constitution: '', registrationNumber: '', practiceVintage: '', yearsInProfession: '', businessAddress: '', natureOfWork: '', grossReceipts: '', netProfit: '', businessPan: '', industry: '', registeredAddress: '', incorporationDate: '', premises: '', businessPhone: '', businessEmail: '', employeeCount: '', ownersPartnersDirectors: '', authorizedSignatory: '', annualTurnover: '', monthlyAverageTurnover: '', netWorth: '', gstRegistered: '', gstin: '', gstFilingStatus: '', itrNumber: '', existingLoans: '', monthlyObligations: '0', accountHolderName: '', accountNumber: '', ifscCode: '', bankName: '' }
 };
 
+const DEFAULT_PERSONAL_LOAN_INTEREST_RATE = 10.5;
+
+const resolveInterestRate = (loanType: string, rate: number | string | null | undefined): number | string => {
+  if (loanType === 'PERSONAL_LOAN' && (rate == null || String(rate).trim() === '' || Number(rate) === 0)) {
+    return DEFAULT_PERSONAL_LOAN_INTEREST_RATE;
+  }
+  return rate ?? '';
+};
+
 const initialLoanDetails: LoanDetails = {
   loanType: 'PERSONAL_LOAN',
   requestedLoanAmount: '',
-  interestRate: '',
+  interestRate: DEFAULT_PERSONAL_LOAN_INTEREST_RATE,
   preferredTenure: 36,
   purposeOfLoan: '',
   additionalDetails: { processingFees: '0', gstOnFees: '0', insuranceCharges: '0', scheduledDisbursalDate: '', coApplicantRequired: 'false', guarantorRequired: 'false' }
@@ -141,9 +156,18 @@ const validEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 const validPan = (value: string) => /^[A-Z]{5}[0-9]{4}[A-Z]$/.test(value);
 const validName = (value: string) => /^[A-Za-z .'-]+$/.test(value.trim());
 const calculateAge = (date: string) => { if (!date) return ''; const born = new Date(date); if (Number.isNaN(born.getTime())) return ''; const today = new Date(); let age = today.getFullYear() - born.getFullYear(); const monthDiff = today.getMonth() - born.getMonth(); if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < born.getDate())) age--; return age >= 0 ? String(age) : ''; };
-const hasMissingRequiredContactDetails = () => Array.from(document.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>(
-  '.required-contact-block input:not([readonly]):not([type="checkbox"]):not([type="button"]), .required-contact-block select, .required-contact-block textarea'
-)).some(field => !field.value.trim());
+const getVisibleInvalidRequiredFields = () => Array.from(document.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>(
+  'input:invalid, select:invalid, textarea:invalid'
+)).filter(field => field.getClientRects().length > 0 && !field.disabled)
+  .map(field => ({
+    field: field.labels?.[0]?.innerText.replace(/\s+/g, ' ').trim() || field.name || field.id || field.type,
+    message: field.validationMessage
+  }));
+
+const getMissingRequiredContactDetails = () => Array.from(document.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>(
+  '.required-contact-block [required]'
+)).filter(field => field.getClientRects().length > 0 && !field.disabled && !field.checkValidity())
+  .map(field => field.labels?.[0]?.innerText.replace(/\s+/g, ' ').trim() || field.name || field.id || 'Required contact field');
 
 const validateMobileNumber = (mobile: string) => {
   if (/\D/.test(mobile)) {
@@ -249,6 +273,7 @@ function App() {
   const [staffApplicationOpen, setStaffApplicationOpen] = useState(false);
   const [showUnderwriting, setShowUnderwriting] = useState(false);
   const [creditScore, setCreditScore] = useState<number | null>(null);
+  const [creditUsingMock, setCreditUsingMock] = useState(false);
   const [creditMode, setCreditMode] = useState<'MANUAL' | 'ONLINE'>('MANUAL');
   const [manualCreditScore, setManualCreditScore] = useState('');
   const [status, setStatus] = useState('DRAFT');
@@ -268,6 +293,8 @@ function App() {
   const [ifscMessages, setIfscMessages] = useState<Record<string, {text: string; error: boolean}>>({});
   const [highestUnlockedStep, setHighestUnlockedStep] = useState(1);
   const [applicationId, setApplicationId] = useState<number | null>(null);
+  const [localDraftId, setLocalDraftId] = useState<string | null>(null);
+  const localDraftIdRef = useRef<string | null>(null);
   const [isCreatingApplication, setIsCreatingApplication] = useState(false);
   const applicationCreationRef = useRef<Promise<number> | null>(null);
   const autoResumeAttemptedRef = useRef<string | null>(null);
@@ -485,12 +512,20 @@ function App() {
       .then(async (response) => {
         const result = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(result?.message || 'Loan pricing could not be loaded.');
-        if (!cancelled && result.interestRate !== undefined && result.interestRate !== null) {
-          setLoanDetails((previous) => ({ ...previous, interestRate: result.interestRate }));
+        if (!cancelled) {
+          setLoanDetails((previous) => ({
+            ...previous,
+            interestRate: resolveInterestRate(previous.loanType,
+              previous.loanType === 'PERSONAL_LOAN' && (result.interestRate == null || String(result.interestRate).trim() === '' || Number(result.interestRate) === 0)
+                ? previous.interestRate
+                : result.interestRate ?? previous.interestRate)
+          }));
           setPricingPolicy({ minAmount: Number(result.minAmount ?? result.minLoanAmount) || undefined, maxAmount: Number(result.maxAmount ?? result.maxLoanAmount) || undefined, minTenure: Number(result.minTenure ?? result.minTenureMonths) || undefined, maxTenure: Number(result.maxTenure ?? result.maxTenureMonths) || undefined, processingFeePercent: Number(result.processingFeePercent ?? 0), gstPercent: Number(result.gstPercent ?? 0), insurancePremium: Number(result.insurancePremium ?? 0), rateType: String(result.rateType || "REDUCING_BALANCE") });
         }
       })
-      .catch(() => undefined);
+      .catch(error => {
+        if (!cancelled) console.error('Loan pricing could not be loaded; retaining the current rate or Personal Loan default.', error);
+      });
     return () => { cancelled = true; };
   }, [session, loanDetails.loanType, applicationId, status]);
 
@@ -543,6 +578,8 @@ function App() {
     }
   };
   const optionalNumber = (value: string | number | null | undefined) => value === '' || value === null || value === undefined || !Number.isFinite(Number(value)) ? null : Number(value);
+  const effectiveInterestRate = resolveInterestRate(loanDetails.loanType, loanDetails.interestRate);
+
   const buildApplicationPayload = () => ({
     applicant: {
       ...applicant,
@@ -558,6 +595,7 @@ function App() {
     },
     loanDetails: {
       ...loanDetails,
+      interestRate: effectiveInterestRate,
       requestedLoanAmount: optionalNumber(loanDetails.requestedLoanAmount),
       preferredTenure: optionalNumber(loanDetails.preferredTenure),
       purposeOfLoan: loanDetails.purposeOfLoan || null,
@@ -586,19 +624,23 @@ function App() {
     setIsCreatingApplication(true);
     setValidationMessage('Creating application...');
     const creation = (async () => {
-      const response = await apiFetch('/api/applications', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(buildApplicationPayload())
-      });
-      const app = await response.json().catch(() => null);
-      if (!response.ok) {
-        throw new Error(describeApiError(app, 'Application creation failed'));
-      }
+      const app = await withDevelopmentTimeout(async signal => {
+        const response = await apiFetch('/api/applications', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(buildApplicationPayload()),
+          signal
+        });
+        const result = await response.json().catch(() => null);
+        if (!response.ok) throw creditServiceError(response.status, describeApiError(result, 'Application creation failed'));
+        return result;
+      }, import.meta.env.DEV);
       if (!app?.id) {
         throw new Error('Application was saved without a valid application ID. Please retry.');
       }
       setApplicationId(app.id);
+      localDraftIdRef.current = null;
+      setLocalDraftId(null);
       setHighestUnlockedStep(1);
       if (app.loanDetails?.loanType) setNewApplicationLoanType(app.loanDetails.loanType);
       setShowUserDashboard(false);
@@ -606,9 +648,9 @@ function App() {
         setLoanDetails((previous) => ({ ...previous, interestRate: app.loanDetails.interestRate }));
       }
       setStatus(app.status || 'DRAFT');
-      await fetchApplications();
       setSaveIndicator(`Temporary ID: DRAFT-${app.id}`);
       setValidationMessage('');
+      void fetchApplications();
       return app.id as number;
     })();
     applicationCreationRef.current = creation;
@@ -617,6 +659,23 @@ function App() {
     } finally {
       applicationCreationRef.current = null;
       setIsCreatingApplication(false);
+      setValidationMessage(message => message === 'Creating application...' ? '' : message);
+    }
+  };
+
+  const ensureCreditApplication = async () => {
+    if (import.meta.env.DEV && localDraftIdRef.current && !applicationId) return null;
+    try {
+      return await ensureApplication();
+    } catch (error) {
+      if (!canUseLocalCreditFallback(error, import.meta.env.DEV)) throw error;
+      console.warn('Draft creation unavailable; using a local-only credit-step draft.', error);
+      const id = localDraftIdRef.current || `APP-DRAFT-${crypto.randomUUID()}`;
+      localDraftIdRef.current = id;
+      setLocalDraftId(id);
+      setSaveIndicator('Local-only draft — not saved to the backend');
+      setValidationMessage(message => message === 'Creating application...' ? '' : message);
+      return null;
     }
   };
 
@@ -629,6 +688,9 @@ function App() {
         throw new Error(app?.message || 'Application could not be loaded.');
       }
       setApplicationId(app.id);
+      localDraftIdRef.current = null;
+      setLocalDraftId(null);
+      setCreditUsingMock(false);
       setHighestUnlockedStep(1);
       if (app.loanDetails?.loanType) setNewApplicationLoanType(app.loanDetails.loanType);
       setShowUserDashboard(false);
@@ -703,7 +765,7 @@ function App() {
 
   const loanValidationMessage = useMemo(() => {
     const principal = parseNumericValue(loanDetails.requestedLoanAmount);
-    const interestRate = parseNumericValue(loanDetails.interestRate);
+    const interestRate = parseNumericValue(effectiveInterestRate);
     const tenure = parseNumericValue(loanDetails.preferredTenure);
 
     if (!Number.isFinite(principal) || principal <= 0) {
@@ -725,7 +787,7 @@ function App() {
     if (pricingPolicy.minTenure && tenure < pricingPolicy.minTenure) return 'Tenure is below the product minimum.';
     if (pricingPolicy.maxTenure && tenure > pricingPolicy.maxTenure) return 'Tenure exceeds the product maximum.';
     return '';
-  }, [loanDetails.requestedLoanAmount, loanDetails.interestRate, loanDetails.preferredTenure, loanDetails.loanType, pricingPolicy]);
+  }, [loanDetails.requestedLoanAmount, effectiveInterestRate, loanDetails.preferredTenure, loanDetails.loanType, pricingPolicy]);
   const calculatedFees = useMemo(() => {
     const amount = Math.max(0, Number(loanDetails.requestedLoanAmount) || 0);
     const processing = Math.round(amount * (pricingPolicy.processingFeePercent || 0) / 100 * 100) / 100;
@@ -741,7 +803,7 @@ function App() {
     }
 
     const principal = parseNumericValue(loanDetails.requestedLoanAmount);
-    const interestRate = parseNumericValue(loanDetails.interestRate);
+    const interestRate = parseNumericValue(effectiveInterestRate);
     const tenure = parseNumericValue(loanDetails.preferredTenure);
 
     if (!Number.isFinite(principal) || principal <= 0 || !Number.isFinite(interestRate) || interestRate < 0 || !Number.isFinite(tenure) || tenure <= 0 || !Number.isInteger(tenure)) {
@@ -760,9 +822,10 @@ function App() {
       totalInterest,
       totalPayable
     };
-  }, [loanDetails.requestedLoanAmount, loanDetails.interestRate, loanDetails.preferredTenure, loanValidationMessage]);
+  }, [loanDetails.requestedLoanAmount, effectiveInterestRate, loanDetails.preferredTenure, loanValidationMessage]);
 
   const handleSaveDraft = async (silent = false) => {
+    if (silent && import.meta.env.DEV && localDraftIdRef.current && !applicationId) return;
     try {
       const mobileError = validateMobileNumber(applicant.mobileNumber);
       if (mobileError) {
@@ -801,40 +864,59 @@ function App() {
     try {
       const mobileError = validateMobileNumber(applicant.mobileNumber);
       if (mobileError) throw new Error(mobileError);
-      const id = await ensureApplication();
-      const saveResponse = await apiFetch(`/api/applications/${id}`, {
-        method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(buildApplicationPayload())
-      });
-      const saved = await saveResponse.json().catch(() => ({}));
-      if (!saveResponse.ok) throw new Error(saved.message || 'Save the application before running a credit check.');
-      const kycVerified = await handleStartKyc(id);
-      if (!kycVerified) throw new Error('KYC verification did not complete successfully. The credit bureau enquiry was not started.');
-      const response = await apiFetch(`/api/applications/${id}/credit-check`, { method: 'POST' });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data?.message || 'Credit check failed.');
+      const id = await ensureCreditApplication();
+      if (id === null) throw new CreditServiceUnavailableError('The draft is local-only.');
+      const data = await withDevelopmentTimeout(async signal => {
+        const saveResponse = await apiFetch(`/api/applications/${id}`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(buildApplicationPayload()), signal
+        });
+        const saved = await saveResponse.json().catch(() => ({}));
+        if (!saveResponse.ok) throw creditServiceError(saveResponse.status, saved.message || 'Save the application before running a credit check.');
+        const kycVerified = await handleStartKyc(id, signal);
+        if (!kycVerified) throw new Error('KYC verification did not complete successfully. The credit bureau enquiry was not started.');
+        const response = await apiFetch(`/api/applications/${id}/credit-check`, { method: 'POST', signal });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) throw creditServiceError(response.status, result?.message || 'Credit check failed.');
+        const score = result.creditCheck?.creditScore;
+        if (!Number.isInteger(score) || score < 300 || score > 900) {
+          throw new CreditServiceUnavailableError('The bureau did not return a valid credit score.');
+        }
+        return result;
+      }, import.meta.env.DEV);
       setCreditScore(data.creditCheck?.creditScore ?? null);
+      setCreditUsingMock(false);
       setStatus(data.status || 'CREDIT_CHECK_COMPLETED');
       setCurrentStep(3);
       setValidationMessage(`Credit check result saved to application ${data.losNumber || id}.`);
-      await fetchApplications();
+      void fetchApplications();
     } catch (error) {
-      setValidationMessage(error instanceof Error ? error.message : 'Credit check failed.');
+      if (canUseLocalCreditFallback(error, import.meta.env.DEV)) {
+        console.warn('Credit service unavailable; displaying an unverified local-development score.', error);
+        setCreditScore(750);
+        setCreditUsingMock(true);
+        setKycMessage('Local-development mock score only. This does not verify KYC or save a bureau result.');
+        setValidationMessage('');
+      } else {
+        setValidationMessage(error instanceof Error ? error.message : 'Credit check failed.');
+      }
     } finally {
       setIsCheckingCredit(false);
     }
   };
 
-  const handleStartKyc = async (id: number) => {
+  const handleStartKyc = async (id: number, signal?: AbortSignal) => {
     try {
       const response = await apiFetch(`/api/applications/${id}/kyc`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ verificationType: 'PAN_VERIFICATION', panNumber: applicant.panNumber, provider: 'SIGNZY', mockMode: mockKycMode })
+        body: JSON.stringify({ verificationType: 'PAN_VERIFICATION', panNumber: applicant.panNumber, provider: 'SIGNZY', mockMode: mockKycMode }),
+        signal
       });
       const data = await response.json();
+      signal?.throwIfAborted();
       if (!response.ok) {
-        throw new Error(data?.message || 'KYC initiation failed');
+        throw creditServiceError(response.status, data?.message || 'KYC initiation failed');
       }
       const nextStatus = data.status || 'PENDING';
       const mappedStatus = nextStatus === 'VERIFIED' ? 'Verified' : nextStatus === 'MANUAL_REVIEW' ? 'Manual Review' : nextStatus === 'FAILED' ? 'Failed' : 'In Progress';
@@ -849,6 +931,8 @@ function App() {
       setKycMessage(message);
       return nextStatus === 'VERIFIED';
     } catch (error) {
+      if (signal?.aborted) throw error;
+      if (signal && canUseLocalCreditFallback(error, import.meta.env.DEV)) throw error;
       const message = error instanceof Error ? error.message : 'KYC could not be started.';
       setKycStatus('Failed');
       setKycMessage(message);
@@ -858,15 +942,17 @@ function App() {
 
   // Consent is recorded on change; bureau calls occur ONLY when Check Online is clicked.
   useEffect(() => {
-    if (currentStep === 3 && (session?.role === 'USER' || staffApplicationOpen) && !applicationId && !isCreatingApplication) {
-      void ensureApplication().catch(error => setValidationMessage(error instanceof Error ? error.message : 'Unable to create temporary application ID.'));
+    if (currentStep === 3 && (session?.role === 'USER' || staffApplicationOpen) && !applicationId && !localDraftId && !isCreatingApplication) {
+      void ensureCreditApplication().catch(error => setValidationMessage(error instanceof Error ? error.message : 'Unable to create temporary application ID.'));
     }
-  }, [currentStep, applicationId, session?.role, staffApplicationOpen]);
+  }, [currentStep, applicationId, localDraftId, session?.role, staffApplicationOpen]);
   const employmentChecklist = DOCUMENTS_BY_EMPLOYMENT[employment.employmentType] || REQUIRED_DOCUMENTS;
   const loanSpecificDocuments: Array<{key: DocumentType; label: string; required: boolean}> = (loanDetails.loanType === 'HOME_LOAN' || loanDetails.loanType === 'LOAN_AGAINST_PROPERTY') ? [{key:'PROPERTY_DOCUMENTS',label:'Property documents (title deed, sale agreement, approved plan, valuation, tax receipt)',required:true}] : loanDetails.loanType === 'CAR_LOAN' ? [{key:'VEHICLE_DOCUMENTS',label:'Vehicle quotation / proforma invoice and insurance',required:true}] : loanDetails.loanType === 'EDUCATION_LOAN' ? [{key:'EDUCATION_DOCUMENTS',label:'Admission letter, fee structure and education records',required:true}] : [];
-  const coApplicantDocuments = applicant.additionalDetails?.coApplicantRequired === 'true' && applicant.additionalDetails?.coApplicantName?.trim() ? [{key:'COAPPLICANT_PAN' as DocumentType,label:'Co-applicant PAN',required:true},{key:'COAPPLICANT_KYC' as DocumentType,label:'Co-applicant KYC / Aadhaar document',required:true},{key:'COAPPLICANT_BANK_STATEMENT' as DocumentType,label:'Co-applicant bank statement (if earning)',required:applicant.additionalDetails?.coApplicantType === 'Earning'},{key:'COAPPLICANT_PHOTOGRAPH' as DocumentType,label:'Co-applicant photograph',required:true},{key:'COAPPLICANT_SIGNATURE' as DocumentType,label:'Co-applicant signature / e-sign',required:true}] : [];
-  const guarantorDocuments = applicant.additionalDetails?.guarantorName?.trim() ? [{key:'GUARANTOR_PAN' as DocumentType,label:'Guarantor PAN',required:true},{key:'GUARANTOR_KYC' as DocumentType,label:'Guarantor KYC / Aadhaar document',required:true},{key:'GUARANTOR_BANK_STATEMENT' as DocumentType,label:'Guarantor bank statement',required:true},{key:'GUARANTOR_PHOTOGRAPH' as DocumentType,label:'Guarantor photograph',required:true},{key:'GUARANTOR_SIGNATURE' as DocumentType,label:'Guarantor signature / e-sign',required:true}] : [];
-  const guarantorEnabled = loanDetails.additionalDetails?.guarantorRequired === 'true' || Boolean(applicant.additionalDetails?.guarantorName?.trim());
+  const isCoApplicantIncluded = applicant.additionalDetails?.coApplicantRequired === 'true';
+  const isGuarantorIncluded = loanDetails.additionalDetails?.guarantorRequired === 'true';
+  const coApplicantDocuments = isCoApplicantIncluded && applicant.additionalDetails?.coApplicantName?.trim() ? [{key:'COAPPLICANT_PAN' as DocumentType,label:'Co-applicant PAN',required:true},{key:'COAPPLICANT_KYC' as DocumentType,label:'Co-applicant KYC / Aadhaar document',required:true},{key:'COAPPLICANT_BANK_STATEMENT' as DocumentType,label:'Co-applicant bank statement (if earning)',required:applicant.additionalDetails?.coApplicantType === 'Earning'},{key:'COAPPLICANT_PHOTOGRAPH' as DocumentType,label:'Co-applicant photograph',required:true},{key:'COAPPLICANT_SIGNATURE' as DocumentType,label:'Co-applicant signature / e-sign',required:true}] : [];
+  const guarantorDocuments = isGuarantorIncluded && applicant.additionalDetails?.guarantorName?.trim() ? [{key:'GUARANTOR_PAN' as DocumentType,label:'Guarantor PAN',required:true},{key:'GUARANTOR_KYC' as DocumentType,label:'Guarantor KYC / Aadhaar document',required:true},{key:'GUARANTOR_BANK_STATEMENT' as DocumentType,label:'Guarantor bank statement',required:true},{key:'GUARANTOR_PHOTOGRAPH' as DocumentType,label:'Guarantor photograph',required:true},{key:'GUARANTOR_SIGNATURE' as DocumentType,label:'Guarantor signature / e-sign',required:true}] : [];
+  const guarantorEnabled = isGuarantorIncluded;
   const guarantorValidationMessage = (() => {
     if (!guarantorEnabled) return '';
     const details = applicant.additionalDetails || {};
@@ -917,26 +1003,171 @@ function App() {
     if (!/^[A-Z]{4}0[A-Z0-9]{6}$/.test(details.guarantorIfsc || '')) return 'Guarantor IFSC must be 11 characters, e.g. ABCD0123456.';
     return '';
   })();
+  const employmentValidationMessage = (() => {
+    if (!employment.employmentType) return 'Select an employment type.';
+    const extra = employment.additionalDetails || {};
+    const requiredFields: Array<[string, string | number]> = [
+      ['Total Experience / Years in Profession', employment.totalWorkExperienceYears],
+      ['Monthly Net Income', employment.monthlyInHandSalary],
+      ['Monthly Gross Salary', employment.monthlyGrossSalary]
+    ];
+    if (employment.employmentType === 'SALARIED') {
+      requiredFields.push(
+        ['Employer Name', employment.employerName],
+        ['Designation', employment.designation],
+        ['Current Employer Experience', employment.currentEmployerExperienceYears],
+        ['Employer Address', extra.employerAddress],
+        ['Official Email', extra.officialEmail],
+        ['Employee ID', extra.employeeId],
+        ['Employment Contract Type', extra.employmentContractType],
+        ['Employer Category', extra.employerCategory],
+        ['Annual Income / CTC', extra.totalAnnualIncome],
+        ['Salary Credit Mode', extra.salaryCreditMode]
+      );
+    } else if (employment.employmentType === 'SELF_EMPLOYED') {
+      requiredFields.push(
+        ['Profession', extra.profession],
+        ['Professional Qualification', extra.qualification],
+        ['Practice / Business Name', extra.practiceBusinessName],
+        ['Constitution', extra.constitution],
+        ['Registration Number', extra.registrationNumber],
+        ['Practice Vintage', extra.practiceVintage],
+        ['Years in Profession', extra.yearsInProfession],
+        ['Business Address', extra.businessAddress],
+        ['Nature of Work', extra.natureOfWork],
+        ['Gross Receipts (annual)', extra.grossReceipts],
+        ['Net Profit / Income', extra.netProfit]
+      );
+    } else {
+      requiredFields.push(
+        ['Business Name', extra.practiceBusinessName],
+        ['Business PAN', extra.businessPan],
+        ['Constitution', extra.constitution],
+        ['Nature of Business', extra.natureOfWork],
+        ['Industry', extra.industry],
+        ['Business / Registered Address', extra.registeredAddress],
+        ['Incorporation / Start Date', extra.incorporationDate],
+        ['Registration Number', extra.registrationNumber],
+        ['Premises', extra.premises],
+        ['Business Phone', extra.businessPhone],
+        ['Business Email', extra.businessEmail],
+        ['Number of Employees', extra.employeeCount],
+        ['Owners / Partners / Directors', extra.ownersPartnersDirectors],
+        ['Authorised Signatory', extra.authorizedSignatory],
+        ['Relationship with Applicant', extra.relationshipToApplicant],
+        ['Annual Turnover', extra.annualTurnover],
+        ['Gross Receipts', extra.grossReceipts],
+        ['Net Profit / Income', extra.netProfit],
+        ['Monthly Average Turnover', extra.monthlyAverageTurnover],
+        ['Net Worth', extra.netWorth],
+        ['GST Registered?', extra.gstRegistered],
+        ['GST Return Filing Status', extra.gstFilingStatus],
+        ['ITR Acknowledgement Number', extra.itrNumber],
+        ['Existing Loans / Obligations', extra.existingLoans]
+      );
+      if (extra.gstRegistered === 'Yes') requiredFields.push(['GSTIN', extra.gstin]);
+    }
+    const missing = requiredFields.find(([, value]) => String(value ?? '').trim() === '');
+    if (missing) return `${missing[0]} is required.`;
+    if (Number(employment.monthlyInHandSalary) <= 0) return 'Monthly net income must be greater than zero.';
+    const nonNegativeValues: Array<string | number | undefined> = [
+      employment.totalWorkExperienceYears,
+      employment.monthlyGrossSalary
+    ].filter(value => value !== undefined && value !== '');
+    if (employment.employmentType === 'SALARIED') {
+      nonNegativeValues.push(employment.currentEmployerExperienceYears, extra.totalAnnualIncome);
+    } else if (employment.employmentType === 'SELF_EMPLOYED') {
+      nonNegativeValues.push(extra.yearsInProfession, extra.grossReceipts, extra.netProfit);
+    } else {
+      nonNegativeValues.push(extra.employeeCount, extra.grossReceipts, extra.netProfit, extra.monthlyAverageTurnover, extra.netWorth);
+    }
+    if (nonNegativeValues.some(value => !Number.isFinite(Number(value)) || Number(value) < 0)) return 'Employment and income amounts and experience must be zero or greater.';
+    if (employment.employmentType === 'BUSINESS_OWNER' && !validPan(extra.businessPan || '')) return 'Business PAN should look like ABCDE1234F.';
+    const emailValues = employment.employmentType === 'SALARIED' ? [extra.officialEmail] : employment.employmentType === 'BUSINESS_OWNER' ? [extra.businessEmail] : [];
+    if (emailValues.some(value => !validEmail(value || ''))) return 'Enter a valid employment email address.';
+    if (employment.employmentType === 'BUSINESS_OWNER' && !/^\d{10}$/.test(extra.businessPhone || '')) return 'Business phone must contain 10 digits.';
+    return '';
+  })();
   const requiredDocuments = [...employmentChecklist, {key:'ADDRESS_PROOF' as DocumentType,label:'Address proof (approved document)',required:true}, {key:'EXISTING_LOAN_STATEMENTS' as DocumentType,label:'Existing loan statements / sanction letters (if applicable)',required:false}, ...(employment.employmentType === 'BUSINESS_OWNER' ? [{key:'BUSINESS_FINANCIALS' as DocumentType,label:'Balance sheet and profit & loss statements',required:true}] : []), ...loanSpecificDocuments, ...coApplicantDocuments, ...guarantorDocuments];
   const missingDocuments = requiredDocuments.filter((doc) => doc.required && documents[doc.key].status !== 'VERIFIED');
   const requiredDocumentsNotUploaded = requiredDocuments.filter(doc => doc.required && !['UPLOADED','UNDER_REVIEW','VERIFIED'].includes(documents[doc.key].status));
-  const continueDisabledReason = currentStep === 1 && guarantorEnabled && guarantorValidationMessage ? guarantorValidationMessage : currentStep === 1 && (!applicant.fullName || !validName(applicant.fullName) || !applicant.dateOfBirth || !validPan(applicant.panNumber) || !validEmail(applicant.email) || !applicant.workEmail || !validEmail(applicant.workEmail) || !/^[1-9][0-9]{5}$/.test(applicant.pincode) || !employment.employmentType || Number(employment.monthlyInHandSalary) <= 0 || (employment.employmentType === 'SALARIED' && (!employment.employerName.trim() || !employment.designation.trim())) || (applicant.additionalDetails?.coApplicantRequired === 'true' && (!applicant.additionalDetails?.coApplicantName?.trim() || (applicant.additionalDetails?.coApplicantPan && !validPan(applicant.additionalDetails.coApplicantPan)) || (applicant.additionalDetails?.coApplicantEmail && !validEmail(applicant.additionalDetails.coApplicantEmail))))) ? 'Complete required applicant, contact, employment, income and co-applicant fields first.' : currentStep === 2 && (loanValidationMessage || loanExtraValidationMessage) ? (loanValidationMessage || loanExtraValidationMessage) : currentStep === 3 && (applicant.additionalDetails?.kycBureauConsent !== 'true' || (creditMode === 'ONLINE' ? creditScore === null || isCheckingCredit : !/^[0-9]{3}$/.test(manualCreditScore) || Number(manualCreditScore) < 300 || Number(manualCreditScore) > 900)) ? (creditMode === 'ONLINE' ? 'Provide consent and complete the online bureau check before continuing.' : 'Provide consent and enter a valid self-reported score from 300 to 900.') : currentStep === 4 && requiredDocumentsNotUploaded.length > 0 ? `Upload all required documents before continuing: ${requiredDocumentsNotUploaded.map(doc => doc.label).join(', ')}.` : '';
+  const continueDisabledReason = currentStep === 1 && (!applicant.fullName || !validName(applicant.fullName) || !applicant.dateOfBirth || !validPan(applicant.panNumber) || !validEmail(applicant.email) || !applicant.workEmail || !validEmail(applicant.workEmail) || !/^[1-9][0-9]{5}$/.test(applicant.pincode) || (isCoApplicantIncluded && (!applicant.additionalDetails?.coApplicantName?.trim() || (applicant.additionalDetails?.coApplicantPan && !validPan(applicant.additionalDetails.coApplicantPan)) || (applicant.additionalDetails?.coApplicantEmail && !validEmail(applicant.additionalDetails.coApplicantEmail))))) ? 'Complete required applicant and contact fields first.' : currentStep === 1 && employmentValidationMessage ? employmentValidationMessage : currentStep === 1 && guarantorEnabled && guarantorValidationMessage ? guarantorValidationMessage : currentStep === 2 && (loanValidationMessage || loanExtraValidationMessage) ? (loanValidationMessage || loanExtraValidationMessage) : currentStep === 3 && (applicant.additionalDetails?.kycBureauConsent !== 'true' || (creditMode === 'ONLINE' ? creditScore === null || isCheckingCredit : !/^[0-9]{3}$/.test(manualCreditScore) || Number(manualCreditScore) < 300 || Number(manualCreditScore) > 900)) ? (creditMode === 'ONLINE' ? 'Provide consent and complete the online bureau check before continuing.' : 'Provide consent and enter a valid self-reported score from 300 to 900.') : currentStep === 4 && requiredDocumentsNotUploaded.length > 0 ? `Upload all required documents before continuing: ${requiredDocumentsNotUploaded.map(doc => doc.label).join(', ')}.` : '';
   const missingFieldCount = [!applicant.fullName, !validPan(applicant.panNumber), !validEmail(applicant.email), (applicant.workEmail !== '' && !validEmail(applicant.workEmail)), !/^[1-9][0-9]{5}$/.test(applicant.pincode), !!loanValidationMessage, !!loanExtraValidationMessage].filter(Boolean).length;
+
+  const handleContinue = () => {
+    if (currentStep === 1) {
+      const invalidRequiredFields = getVisibleInvalidRequiredFields();
+      const validationErrors = [
+        ...invalidRequiredFields.map(({ field, message }) => `${field}: ${message}`),
+        ...(!applicant.fullName ? ['Full name is required.'] : !validName(applicant.fullName) ? ['Full name should contain letters only.'] : []),
+        ...(!applicant.dateOfBirth ? ['Date of birth is required.'] : []),
+        ...(validateMobileNumber(applicant.mobileNumber) ? [validateMobileNumber(applicant.mobileNumber)] : []),
+        ...(!validPan(applicant.panNumber) ? ['PAN should look like ABCDE1234F.'] : []),
+        ...(!validEmail(applicant.email) ? ['Enter a valid personal email address.'] : []),
+        ...(!applicant.workEmail ? ['Work email is required.'] : applicant.workEmail && !validEmail(applicant.workEmail) ? ['Enter a valid work email address.'] : []),
+        ...(!/^[1-9][0-9]{5}$/.test(applicant.pincode) ? ['PIN code must be a valid 6-digit Indian PIN code.'] : []),
+        ...getMissingRequiredContactDetails().map(field => `${field} is required.`),
+        ...(employmentValidationMessage ? [employmentValidationMessage] : []),
+        ...(isCoApplicantIncluded ? [
+          ...(!applicant.additionalDetails?.coApplicantName?.trim() ? ['Co-applicant name is required.'] : []),
+          ...(applicant.additionalDetails?.coApplicantPan && !validPan(applicant.additionalDetails.coApplicantPan) ? ['Co-applicant PAN should look like ABCDE1234F.'] : []),
+          ...(applicant.additionalDetails?.coApplicantEmail && !validEmail(applicant.additionalDetails.coApplicantEmail) ? ['Enter a valid co-applicant email address.'] : []),
+          ...(applicant.additionalDetails?.coApplicantWorkEmail && !validEmail(applicant.additionalDetails.coApplicantWorkEmail) ? ['Enter a valid co-applicant work email address.'] : [])
+        ] : []),
+        ...(isGuarantorIncluded && guarantorValidationMessage ? [guarantorValidationMessage] : [])
+      ];
+      const uniqueErrors = [...new Set(validationErrors)];
+      console.log('Step 1 validation errors:', uniqueErrors);
+      console.log('Step 1 invalid visible required fields:', invalidRequiredFields);
+      if (uniqueErrors.length) {
+        setValidationMessage(uniqueErrors.join(' '));
+        const mobileError = validateMobileNumber(applicant.mobileNumber);
+        if (mobileError) setApplicantMobileError(mobileError);
+        return;
+      }
+    }
+    if (currentStep === 2 && (loanValidationMessage || loanExtraValidationMessage)) {
+      const errors = [loanValidationMessage, loanExtraValidationMessage].filter(Boolean);
+      console.log('Step 2 validation errors:', errors);
+      setValidationMessage(errors.join(' '));
+      return;
+    }
+    if (currentStep === 4 && requiredDocumentsNotUploaded.length > 0) {
+      const errors = requiredDocumentsNotUploaded.map(doc => `Upload required document: ${doc.label}.`);
+      console.log('Step 4 validation errors:', errors);
+      setValidationMessage(`Upload all required documents before continuing: ${requiredDocumentsNotUploaded.map(doc => doc.label).join(', ')}.`);
+      return;
+    }
+    if (currentStep < 5) {
+      setHighestUnlockedStep(step => Math.max(step, currentStep + 1));
+      setCurrentStep(step => step + 1);
+      setValidationMessage('');
+    } else {
+      void handleSubmit();
+    }
+  };
 
   const handleSubmit = async () => {
     try {
-      if (hasMissingRequiredContactDetails()) { setValidationMessage('Complete all required contact and additional details before continuing.'); return; }
+      const missingContactDetails = getMissingRequiredContactDetails();
+      if (missingContactDetails.length) {
+        console.log('Submission validation errors:', missingContactDetails);
+        setValidationMessage(`Complete these required contact fields: ${missingContactDetails.join(', ')}.`);
+        return;
+      }
       const mobileError = validateMobileNumber(applicant.mobileNumber);
       if (mobileError) { setApplicantMobileError(mobileError); setValidationMessage(mobileError); return; }
       if (!applicant.fullName || !validName(applicant.fullName)) { setValidationMessage('Enter a valid full name using letters only.'); return; }
       if (!validPan(applicant.panNumber)) { setValidationMessage('PAN should look like ABCDE1234F.'); return; }
       if (!validEmail(applicant.email) || !applicant.workEmail || !validEmail(applicant.workEmail)) { setValidationMessage('Enter valid personal and work email addresses.'); return; }
-      const extraEmails = [employment.additionalDetails?.officialEmail, employment.additionalDetails?.businessEmail, ...(applicant.additionalDetails?.coApplicantRequired === 'true' ? [applicant.additionalDetails?.coApplicantEmail, applicant.additionalDetails?.coApplicantWorkEmail] : []), ...(guarantorEnabled ? [applicant.additionalDetails?.guarantorEmail] : [])].filter((value): value is string => Boolean(value));
+      if (employmentValidationMessage) { setValidationMessage(employmentValidationMessage); return; }
+      const employmentEmails = employment.employmentType === 'SALARIED' ? [employment.additionalDetails?.officialEmail] : employment.employmentType === 'BUSINESS_OWNER' ? [employment.additionalDetails?.businessEmail] : [];
+      const extraEmails = [...employmentEmails, ...(isCoApplicantIncluded ? [applicant.additionalDetails?.coApplicantEmail, applicant.additionalDetails?.coApplicantWorkEmail] : []), ...(isGuarantorIncluded ? [applicant.additionalDetails?.guarantorEmail] : [])].filter((value): value is string => Boolean(value));
       if (extraEmails.some(value => !validEmail(value))) { setValidationMessage('Correct the employer, business, co-applicant or guarantor email format before submission.'); return; }
       if (!/^[1-9][0-9]{5}$/.test(applicant.pincode)) { setValidationMessage('PIN code must be a valid 6-digit Indian PIN code.'); return; }
-      const suppliedIfscs = [applicant.additionalDetails?.ifscCode, ...(applicant.additionalDetails?.coApplicantRequired === 'true' ? [applicant.additionalDetails?.coApplicantIfsc] : []), ...(guarantorEnabled ? [applicant.additionalDetails?.guarantorIfsc] : [])].filter((value): value is string => Boolean(value));
+      const suppliedIfscs = [applicant.additionalDetails?.ifscCode, ...(isCoApplicantIncluded ? [applicant.additionalDetails?.coApplicantIfsc] : []), ...(isGuarantorIncluded ? [applicant.additionalDetails?.guarantorIfsc] : [])].filter((value): value is string => Boolean(value));
       if (suppliedIfscs.some(value => !/^[A-Z]{4}0[A-Z0-9]{6}$/.test(value))) { setValidationMessage('Correct the IFSC code format. IFSC must contain 11 characters, for example ABCD0123456.'); return; }
-      if (applicant.additionalDetails?.coApplicantRequired === 'true') {
+      if (isCoApplicantIncluded) {
         if (!applicant.additionalDetails?.coApplicantName?.trim()) { setValidationMessage('Enter the co-applicant name or uncheck Include a co-applicant.'); return; }
         if (applicant.additionalDetails?.coApplicantName && !validName(applicant.additionalDetails.coApplicantName)) { setValidationMessage('Co-applicant name must contain letters only.'); return; }
         if (applicant.additionalDetails?.coApplicantPan && !validPan(applicant.additionalDetails.coApplicantPan)) { setValidationMessage('Co-applicant PAN should look like ABCDE1234F.'); return; }
@@ -1153,8 +1384,9 @@ function App() {
     setStaffApplicationOpen(true);
     resetIdentity();
     setApplicationId(null); setSubmittedApplication(null); setSaveIndicator(''); setStatus('DRAFT'); setCreditScore(null); setManualCreditScore(''); setCreditMode('MANUAL');
+    localDraftIdRef.current = null; setLocalDraftId(null); setCreditUsingMock(false);
     setApplicant({ ...initialApplicant, mobileNumber: session?.mobile || initialApplicant.mobileNumber });
-    setEmployment(initialEmployment); setLoanDetails({ ...initialLoanDetails, loanType: newApplicationLoanType }); setDocuments(createInitialDocuments());
+    setEmployment(initialEmployment); setLoanDetails({ ...initialLoanDetails, loanType: newApplicationLoanType, interestRate: resolveInterestRate(newApplicationLoanType, '') }); setDocuments(createInitialDocuments());
     setSelectedFiles(Object.fromEntries(Object.keys(createInitialDocuments()).map((key) => [key, ''])) as Record<DocumentType, string>);
     setCurrentStep(1); setHighestUnlockedStep(1); setValidationMessage('');
   };
@@ -1239,11 +1471,11 @@ function App() {
         || previous === 'Guarantor PIN code must be a valid 6-digit Indian PIN code.'
         || previous === 'Guarantor IFSC must be 11 characters, e.g. ABCD0123456.') return '';
       if (previous === 'Correct the employer, business, co-applicant or guarantor email format before submission.') {
-        const otherEmails = [employment.additionalDetails?.officialEmail, employment.additionalDetails?.businessEmail, ...(applicant.additionalDetails?.coApplicantRequired === 'true' ? [applicant.additionalDetails?.coApplicantEmail, applicant.additionalDetails?.coApplicantWorkEmail] : [])].filter((value): value is string => Boolean(value));
+        const otherEmails = [employment.additionalDetails?.officialEmail, employment.additionalDetails?.businessEmail, ...(isCoApplicantIncluded ? [applicant.additionalDetails?.coApplicantEmail, applicant.additionalDetails?.coApplicantWorkEmail] : [])].filter((value): value is string => Boolean(value));
         if (!otherEmails.some(value => !validEmail(value))) return '';
       }
       if (previous === 'Correct the IFSC code format. IFSC must contain 11 characters, for example ABCD0123456.') {
-        const otherIfscs = [applicant.additionalDetails?.ifscCode, ...(applicant.additionalDetails?.coApplicantRequired === 'true' ? [applicant.additionalDetails?.coApplicantIfsc] : [])].filter((value): value is string => Boolean(value));
+        const otherIfscs = [applicant.additionalDetails?.ifscCode, ...(isCoApplicantIncluded ? [applicant.additionalDetails?.coApplicantIfsc] : [])].filter((value): value is string => Boolean(value));
         if (!otherIfscs.some(value => !/^[A-Z]{4}0[A-Z0-9]{6}$/.test(value))) return '';
       }
       return previous;
@@ -1456,7 +1688,7 @@ function App() {
             <label>Account Type<select value={applicant.additionalDetails?.accountType || ''} onChange={e => setApplicantExtra('accountType', e.target.value)}><option value="">Select</option><option>Savings</option><option>Current</option></select></label>
             <label>Salary Account<select value={applicant.additionalDetails?.salaryAccount || ''} onChange={e => setApplicantExtra('salaryAccount', e.target.value)}><option value="">Select</option><option>Yes</option><option>No</option></select></label>
             </div></section>
-            <label className="full-width checkbox-field inline-checkbox-field"><input type="checkbox" checked={applicant.additionalDetails?.coApplicantRequired === 'true'} onChange={event => handleCoApplicantToggle(event.target.checked)} />Add a co-applicant</label>
+            <label className="full-width checkbox-field inline-checkbox-field"><span><input type="checkbox" checked={isCoApplicantIncluded} onChange={event => handleCoApplicantToggle(event.target.checked)} /></span>Add a co-applicant</label>
             {applicant.additionalDetails?.coApplicantRequired === 'true' && <section ref={coApplicantSectionRef} className="full-width card form-card" aria-label="Co-applicant Details"><h3>Co-applicant Details</h3><div className="field-grid">
             <label>Name<input value={applicant.additionalDetails?.coApplicantName || ''} onChange={e => setApplicantExtra('coApplicantName', e.target.value.replace(/[^A-Za-z .'-]/g, ''))} /></label>
             <label>Relationship<input value={applicant.additionalDetails?.coApplicantRelationship || ''} onChange={e => setApplicantExtra('coApplicantRelationship', e.target.value.replace(/[^A-Za-z .'-]/g, ''))} /></label>
@@ -1494,7 +1726,7 @@ function App() {
             <label>Branch<input value={applicant.additionalDetails?.coApplicantBranch || ''} onChange={e => setApplicantExtra('coApplicantBranch', e.target.value)} /></label>
             <label>Account Type<select value={applicant.additionalDetails?.coApplicantAccountType || ''} onChange={e => setApplicantExtra('coApplicantAccountType', e.target.value)}><option value="">Select</option><option>Savings</option><option>Current</option></select></label>
             </div></section>}
-            <label className="full-width checkbox-field inline-checkbox-field"><input type="checkbox" checked={guarantorEnabled} onChange={event => handleGuarantorToggle(event.target.checked)} />Add a guarantor</label>
+            <label className="full-width checkbox-field inline-checkbox-field"><span><input type="checkbox" checked={isGuarantorIncluded} onChange={event => handleGuarantorToggle(event.target.checked)} /></span>Add a guarantor</label>
             {guarantorEnabled && <section className="full-width card form-card" aria-label="Guarantor Details"><h3>Guarantor Details</h3><div className="field-grid">
             <label>Name<input required value={applicant.additionalDetails?.guarantorName || ''} onChange={e => setApplicantExtra('guarantorName', e.target.value.replace(/[^A-Za-z .'-]/g, ''))} />{applicant.additionalDetails?.guarantorName && !validName(applicant.additionalDetails.guarantorName) && <small className="field-error">Name should contain letters only.</small>}</label>
             <label>Relationship<select required value={applicant.additionalDetails?.guarantorRelationship || ''} onChange={e => setApplicantExtra('guarantorRelationship', e.target.value)}><option value="">Select relationship</option><option>Spouse</option><option>Parent</option><option>Child</option><option>Sibling</option><option>Relative</option><option>Other</option></select></label>
@@ -1541,78 +1773,76 @@ function App() {
           </div>
         </section>
 
-        <section className="card form-card" style={{display: (session.role === 'ADMIN' ? staffApplicationOpen : !showUserDashboard) && currentStep === 1 ? undefined : 'none'}} onBlurCapture={scheduleAutoSave}>
+        <section className="card form-card employment-income-block" style={{display: (session.role === 'ADMIN' ? staffApplicationOpen : !showUserDashboard) && currentStep === 1 ? undefined : 'none'}} onBlurCapture={scheduleAutoSave}>
           <h2>Employment & Income</h2>
           <div className="field-grid">
             <label>Employment Type <span className="required-asterisk">*</span>
-              <select value={employment.employmentType} onChange={(e) => setEmployment({ ...employment, employmentType: e.target.value })}>
+              <select required value={employment.employmentType} onChange={(e) => setEmployment({ ...employment, employmentType: e.target.value })}>
+                <option value="">Select</option>
                 <option value="SALARIED">Salaried</option>
                 <option value="SELF_EMPLOYED">Self Employed</option>
                 <option value="BUSINESS_OWNER">Business Owner</option>
               </select>
             </label>
             {employment.employmentType === 'SALARIED' && <>
-              <label>Employer Name <span className="required-asterisk">*</span><input value={employment.employerName} onChange={(e) => setEmployment({ ...employment, employerName: e.target.value })} /></label>
-              <label>Designation <span className="required-asterisk">*</span><input value={employment.designation} onChange={(e) => setEmployment({ ...employment, designation: e.target.value.replace(/[^A-Za-z .'-]/g, '') })} /></label>
-              <label>Total Work Experience (years)<input type="number" min="0" value={employment.totalWorkExperienceYears} onChange={(e) => setEmployment({ ...employment, totalWorkExperienceYears: e.target.value })} /></label>
-              <label>Current Employer Experience (years)<input type="number" min="0" value={employment.currentEmployerExperienceYears} onChange={(e) => setEmployment({ ...employment, currentEmployerExperienceYears: e.target.value })} /></label>
+              <label>Employer Name <span className="required-asterisk">*</span><input required value={employment.employerName} onChange={(e) => setEmployment({ ...employment, employerName: e.target.value })} /></label>
+              <label>Designation <span className="required-asterisk">*</span><input required value={employment.designation} onChange={(e) => setEmployment({ ...employment, designation: e.target.value.replace(/[^A-Za-z .'-]/g, '') })} /></label>
+              <label>Current Employer Experience (years) <span className="required-asterisk">*</span><input required type="number" min="0" value={employment.currentEmployerExperienceYears} onChange={(e) => setEmployment({ ...employment, currentEmployerExperienceYears: e.target.value })} /></label>
             </>}
-            {employment.employmentType !== 'SALARIED' && <label>Total Experience / Years in Profession<input type="number" min="0" value={employment.totalWorkExperienceYears} onChange={(e) => setEmployment({ ...employment, totalWorkExperienceYears: e.target.value })} /></label>}
-            <label>{employment.employmentType === 'SALARIED' ? 'Monthly Net Salary' : 'Monthly Net Income'}<input type="number" min="1" value={employment.monthlyInHandSalary} onChange={(e) => setEmployment({ ...employment, monthlyInHandSalary: e.target.value })} /></label>
-            <label>{employment.employmentType === 'SALARIED' ? 'Monthly Gross Salary' : 'Monthly Gross Receipts'}<input type="number" min="0" value={employment.monthlyGrossSalary} onChange={(e) => setEmployment({ ...employment, monthlyGrossSalary: e.target.value })} /></label>
-            <details className="full-width"><summary>Additional employment, business, financial and bank details</summary><div className="field-grid">
-            {employment.employmentType === 'SALARIED' && <>
-              <label>Employer Address<input value={employment.additionalDetails?.employerAddress || ''} onChange={e => setEmploymentExtra('employerAddress', e.target.value)} /></label>
-              <label>Official Email<input type="email" value={employment.additionalDetails?.officialEmail || ''} onChange={e => setEmploymentExtra('officialEmail', e.target.value)} onBlur={() => setValidationMessage(employment.additionalDetails?.officialEmail && !validEmail(employment.additionalDetails.officialEmail) ? 'Enter a valid employer official email address.' : '')} />{employment.additionalDetails?.officialEmail && !validEmail(employment.additionalDetails.officialEmail) && <small className="field-error">Enter a valid employer official email address.</small>}</label>
-              <label>Employee ID<input value={employment.additionalDetails?.employeeId || ''} onChange={e => setEmploymentExtra('employeeId', e.target.value)} /></label>
-              <label>Employment Contract Type<select value={employment.additionalDetails?.employmentContractType || ''} onChange={e => setEmploymentExtra('employmentContractType', e.target.value)}><option value="">Select</option><option>PERMANENT</option><option>CONTRACT</option></select></label>
-              <label>Employer Category<select value={employment.additionalDetails?.employerCategory || ''} onChange={e => setEmploymentExtra('employerCategory', e.target.value)}><option value="">Select</option><option>GOVERNMENT</option><option>LISTED</option><option>MNC</option><option>OTHER</option></select></label>
-              <label>Annual Income / CTC<input type="number" min="0" value={employment.additionalDetails?.totalAnnualIncome || ''} onChange={e => setEmploymentExtra('totalAnnualIncome', e.target.value)} /></label>
-              <label>Salary Credit Mode<select value={employment.additionalDetails?.salaryCreditMode || ''} onChange={e => setEmploymentExtra('salaryCreditMode', e.target.value)}><option value="">Select</option><option>Bank transfer</option><option>Cheque</option><option>Cash</option></select></label>
-            </>}
-            {employment.employmentType === 'SELF_EMPLOYED' && <>
-              <label>Profession<input value={employment.additionalDetails?.profession || ''} onChange={e => setEmploymentExtra('profession', e.target.value)} /></label>
-              <label>Professional Qualification<input value={employment.additionalDetails?.qualification || ''} onChange={e => setEmploymentExtra('qualification', e.target.value)} /></label>
-              <label>Practice / Business Name<input value={employment.additionalDetails?.practiceBusinessName || ''} onChange={e => setEmploymentExtra('practiceBusinessName', e.target.value)} /></label>
-              <label>Constitution<input value={employment.additionalDetails?.constitution || ''} onChange={e => setEmploymentExtra('constitution', e.target.value)} /></label>
-              <label>Registration Number<input value={employment.additionalDetails?.registrationNumber || ''} onChange={e => setEmploymentExtra('registrationNumber', e.target.value)} /></label>
-              <label>Practice Vintage<input value={employment.additionalDetails?.practiceVintage || ''} onChange={e => setEmploymentExtra('practiceVintage', e.target.value)} /></label>
-              <label>Years in Profession<input type="number" min="0" value={employment.additionalDetails?.yearsInProfession || ''} onChange={e => setEmploymentExtra('yearsInProfession', e.target.value)} /></label>
-              <label>Business Address<input value={employment.additionalDetails?.businessAddress || ''} onChange={e => setEmploymentExtra('businessAddress', e.target.value)} /></label>
-              <label>Nature of Work<input value={employment.additionalDetails?.natureOfWork || ''} onChange={e => setEmploymentExtra('natureOfWork', e.target.value)} /></label>
-              <label>Gross Receipts (annual)<input type="number" min="0" value={employment.additionalDetails?.grossReceipts || ''} onChange={e => setEmploymentExtra('grossReceipts', e.target.value)} /></label>
-              <label>Net Profit / Income<input type="number" min="0" value={employment.additionalDetails?.netProfit || ''} onChange={e => setEmploymentExtra('netProfit', e.target.value)} /></label>
-            </>}
-            {employment.employmentType === 'BUSINESS_OWNER' && <>
+            <label>Total Experience / Years in Profession (years) <span className="required-asterisk">*</span><input required type="number" min="0" value={employment.totalWorkExperienceYears} onChange={(e) => setEmployment({ ...employment, totalWorkExperienceYears: e.target.value })} /></label>
+            <label>{employment.employmentType === 'SALARIED' ? 'Monthly Net Salary' : 'Monthly Net Income'} <span className="required-asterisk">*</span><span style={{ display: 'flex', alignItems: 'center', gap: 8 }}><span aria-hidden="true">₹</span><input required inputMode="numeric" min="1" value={formatIndianIncome(employment.monthlyInHandSalary)} onChange={e => setEmployment({ ...employment, monthlyInHandSalary: e.target.value.replace(/\D/g, '') })} /></span><small className="field-hint">Enter your monthly take-home income in rupees.</small></label>
+            <label>Monthly Gross Salary <span className="required-asterisk">*</span><span style={{ display: 'flex', alignItems: 'center', gap: 8 }}><span aria-hidden="true">₹</span><input required inputMode="numeric" min="0" value={formatIndianIncome(employment.monthlyGrossSalary)} onChange={e => setEmployment({ ...employment, monthlyGrossSalary: e.target.value.replace(/\D/g, '') })} /></span><small className="field-hint">Enter gross salary or income before deductions in rupees.</small></label>
+            {employment.employmentType === 'SALARIED' && <div className="full-width field-grid">
+              <label>Employer Address <span className="required-asterisk">*</span><input required value={employment.additionalDetails?.employerAddress || ''} onChange={e => setEmploymentExtra('employerAddress', e.target.value)} /></label>
+              <label>Official Email <span className="required-asterisk">*</span><input required type="email" value={employment.additionalDetails?.officialEmail || ''} onChange={e => setEmploymentExtra('officialEmail', e.target.value)} onBlur={() => setValidationMessage(employment.additionalDetails?.officialEmail && !validEmail(employment.additionalDetails.officialEmail) ? 'Enter a valid employer official email address.' : '')} />{employment.additionalDetails?.officialEmail && !validEmail(employment.additionalDetails.officialEmail) && <small className="field-error">Enter a valid employer official email address.</small>}</label>
+              <label>Employee ID <span className="required-asterisk">*</span><input required value={employment.additionalDetails?.employeeId || ''} onChange={e => setEmploymentExtra('employeeId', e.target.value)} /></label>
+              <label>Employment Contract Type <span className="required-asterisk">*</span><select required value={employment.additionalDetails?.employmentContractType || ''} onChange={e => setEmploymentExtra('employmentContractType', e.target.value)}><option value="">Select</option><option>PERMANENT</option><option>CONTRACT</option></select></label>
+              <label>Employer Category <span className="required-asterisk">*</span><select required value={employment.additionalDetails?.employerCategory || ''} onChange={e => setEmploymentExtra('employerCategory', e.target.value)}><option value="">Select</option><option>GOVERNMENT</option><option>LISTED</option><option>MNC</option><option>OTHER</option></select></label>
+              <label>Annual Income / CTC <span className="required-asterisk">*</span><input required type="number" min="0" value={employment.additionalDetails?.totalAnnualIncome || ''} onChange={e => setEmploymentExtra('totalAnnualIncome', e.target.value)} /></label>
+              <label>Salary Credit Mode <span className="required-asterisk">*</span><select required value={employment.additionalDetails?.salaryCreditMode || ''} onChange={e => setEmploymentExtra('salaryCreditMode', e.target.value)}><option value="">Select</option><option>Bank transfer</option><option>Cheque</option><option>Cash</option></select></label>
+            </div>}
+            {employment.employmentType === 'SELF_EMPLOYED' && <div className="full-width field-grid">
+              <label>Profession <span className="required-asterisk">*</span><input required value={employment.additionalDetails?.profession || ''} onChange={e => setEmploymentExtra('profession', e.target.value)} /></label>
+              <label>Professional Qualification <span className="required-asterisk">*</span><select required value={employment.additionalDetails?.qualification || ''} onChange={e => setEmploymentExtra('qualification', e.target.value)}><option value="">Select qualification</option><option>Below 10th</option><option>10th Pass</option><option>12th Pass</option><option>Diploma</option><option>Graduate</option><option>Postgraduate</option><option>Doctorate</option><option>Other</option></select></label>
+              <label>Practice / Business Name <span className="required-asterisk">*</span><input required value={employment.additionalDetails?.practiceBusinessName || ''} onChange={e => setEmploymentExtra('practiceBusinessName', e.target.value)} /></label>
+              <label>Constitution <span className="required-asterisk">*</span><select required value={employment.additionalDetails?.constitution || ''} onChange={e => setEmploymentExtra('constitution', e.target.value)}><option value="">Select constitution</option><option>Proprietorship</option><option>Partnership</option><option>LLP</option><option>Private Limited</option><option>Public Limited</option><option>Other</option></select></label>
+              <label>Registration Number <span className="required-asterisk">*</span><input required value={employment.additionalDetails?.registrationNumber || ''} onChange={e => setEmploymentExtra('registrationNumber', e.target.value)} /></label>
+              <label>Practice Vintage <span className="required-asterisk">*</span><input required value={employment.additionalDetails?.practiceVintage || ''} onChange={e => setEmploymentExtra('practiceVintage', e.target.value)} /></label>
+              <label>Years in Profession (years) <span className="required-asterisk">*</span><input required type="number" min="0" value={employment.additionalDetails?.yearsInProfession || ''} onChange={e => setEmploymentExtra('yearsInProfession', e.target.value)} /></label>
+              <label>Business Address <span className="required-asterisk">*</span><input required value={employment.additionalDetails?.businessAddress || ''} onChange={e => setEmploymentExtra('businessAddress', e.target.value)} /></label>
+              <label>Nature of Work <span className="required-asterisk">*</span><input required value={employment.additionalDetails?.natureOfWork || ''} onChange={e => setEmploymentExtra('natureOfWork', e.target.value)} /></label>
+              <label>Gross Receipts (annual) <span className="required-asterisk">*</span><input required type="number" min="0" value={employment.additionalDetails?.grossReceipts || ''} onChange={e => setEmploymentExtra('grossReceipts', e.target.value)} /></label>
+              <label>Net Profit / Income <span className="required-asterisk">*</span><input required type="number" min="0" value={employment.additionalDetails?.netProfit || ''} onChange={e => setEmploymentExtra('netProfit', e.target.value)} /></label>
+            </div>}
+            {employment.employmentType === 'BUSINESS_OWNER' && <div className="full-width field-grid">
               <h3 className="full-width">Business Information</h3>
-              <label>Business Name<input value={employment.additionalDetails?.practiceBusinessName || ''} onChange={e => setEmploymentExtra('practiceBusinessName', e.target.value)} /></label>
-              <label>Business PAN<input maxLength={10} value={employment.additionalDetails?.businessPan || ''} onChange={e => setEmploymentExtra('businessPan', e.target.value.toUpperCase())} /></label>
-              <label>Constitution<select value={employment.additionalDetails?.constitution || ''} onChange={e => setEmploymentExtra('constitution', e.target.value)}><option value="">Select</option><option>Proprietorship</option><option>Partnership</option><option>LLP</option><option>Private Limited</option><option>Public Limited</option><option>Other</option></select></label>
-              <label>Nature of Business<input value={employment.additionalDetails?.natureOfWork || ''} onChange={e => setEmploymentExtra('natureOfWork', e.target.value)} /></label>
-              <label>Industry<input value={employment.additionalDetails?.industry || ''} onChange={e => setEmploymentExtra('industry', e.target.value)} /></label>
-              <label>Business / Registered Address<input value={employment.additionalDetails?.registeredAddress || ''} onChange={e => setEmploymentExtra('registeredAddress', e.target.value)} /></label>
-              <label>Incorporation / Start Date<input type="date" value={employment.additionalDetails?.incorporationDate || ''} onChange={e => setEmploymentExtra('incorporationDate', e.target.value)} /></label>
-              <label>Registration Number (CIN / LLPIN / Udyam)<input value={employment.additionalDetails?.registrationNumber || ''} onChange={e => setEmploymentExtra('registrationNumber', e.target.value)} /></label>
-              <label>Premises<select value={employment.additionalDetails?.premises || ''} onChange={e => setEmploymentExtra('premises', e.target.value)}><option value="">Select</option><option>Owned</option><option>Rented</option></select></label>
-              <label>Business Phone<input inputMode="numeric" maxLength={10} value={employment.additionalDetails?.businessPhone || ''} onChange={e => setEmploymentExtra('businessPhone', e.target.value.replace(/\D/g,'').slice(0,10))} /></label>
-              <label>Business Email<input type="email" value={employment.additionalDetails?.businessEmail || ''} onChange={e => setEmploymentExtra('businessEmail', e.target.value)} onBlur={() => setValidationMessage(employment.additionalDetails?.businessEmail && !validEmail(employment.additionalDetails.businessEmail) ? 'Enter a valid business email address.' : '')} />{employment.additionalDetails?.businessEmail && !validEmail(employment.additionalDetails.businessEmail) && <small className="field-error">Enter a valid business email address.</small>}</label>
-              <label>Number of Employees<input type="number" min="0" value={employment.additionalDetails?.employeeCount || ''} onChange={e => setEmploymentExtra('employeeCount', e.target.value)} /></label>
-              <label className="full-width">Owners / Partners / Directors (name, PAN, shareholding, KYC/consent)<textarea value={employment.additionalDetails?.ownersPartnersDirectors || ''} onChange={e => setEmploymentExtra('ownersPartnersDirectors', e.target.value)} /></label>
-              <label>Authorised Signatory<input value={employment.additionalDetails?.authorizedSignatory || ''} onChange={e => setEmploymentExtra('authorizedSignatory', e.target.value)} /></label>
-              <label>Relationship with Applicant<input value={employment.additionalDetails?.relationshipToApplicant || ''} onChange={e => setEmploymentExtra('relationshipToApplicant', e.target.value)} /></label>
+              <label>Business Name <span className="required-asterisk">*</span><input required value={employment.additionalDetails?.practiceBusinessName || ''} onChange={e => setEmploymentExtra('practiceBusinessName', e.target.value)} /></label>
+              <label>Business PAN <span className="required-asterisk">*</span><input required maxLength={10} value={employment.additionalDetails?.businessPan || ''} onChange={e => setEmploymentExtra('businessPan', e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))} /></label>
+              <label>Constitution <span className="required-asterisk">*</span><select required value={employment.additionalDetails?.constitution || ''} onChange={e => setEmploymentExtra('constitution', e.target.value)}><option value="">Select constitution</option><option>Proprietorship</option><option>Partnership</option><option>LLP</option><option>Private Limited</option><option>Public Limited</option><option>Other</option></select></label>
+              <label>Nature of Business <span className="required-asterisk">*</span><input required value={employment.additionalDetails?.natureOfWork || ''} onChange={e => setEmploymentExtra('natureOfWork', e.target.value)} /></label>
+              <label>Industry <span className="required-asterisk">*</span><input required value={employment.additionalDetails?.industry || ''} onChange={e => setEmploymentExtra('industry', e.target.value)} /></label>
+              <label>Business / Registered Address <span className="required-asterisk">*</span><input required value={employment.additionalDetails?.registeredAddress || ''} onChange={e => setEmploymentExtra('registeredAddress', e.target.value)} /></label>
+              <label>Incorporation / Start Date <span className="required-asterisk">*</span><input required type="date" value={employment.additionalDetails?.incorporationDate || ''} onChange={e => setEmploymentExtra('incorporationDate', e.target.value)} /></label>
+              <label>Registration Number (CIN / LLPIN / Udyam) <span className="required-asterisk">*</span><input required value={employment.additionalDetails?.registrationNumber || ''} onChange={e => setEmploymentExtra('registrationNumber', e.target.value)} /></label>
+              <label>Premises <span className="required-asterisk">*</span><select required value={employment.additionalDetails?.premises || ''} onChange={e => setEmploymentExtra('premises', e.target.value)}><option value="">Select</option><option>Owned</option><option>Rented</option></select></label>
+              <label>Business Phone <span className="required-asterisk">*</span><input required inputMode="numeric" minLength={10} maxLength={10} pattern="[0-9]{10}" value={employment.additionalDetails?.businessPhone || ''} onChange={e => setEmploymentExtra('businessPhone', e.target.value.replace(/\D/g,'').slice(0,10))} /></label>
+              <label>Business Email <span className="required-asterisk">*</span><input required type="email" value={employment.additionalDetails?.businessEmail || ''} onChange={e => setEmploymentExtra('businessEmail', e.target.value)} onBlur={() => setValidationMessage(employment.additionalDetails?.businessEmail && !validEmail(employment.additionalDetails.businessEmail) ? 'Enter a valid business email address.' : '')} />{employment.additionalDetails?.businessEmail && !validEmail(employment.additionalDetails.businessEmail) && <small className="field-error">Enter a valid business email address.</small>}</label>
+              <label>Number of Employees <span className="required-asterisk">*</span><input required type="number" min="0" value={employment.additionalDetails?.employeeCount || ''} onChange={e => setEmploymentExtra('employeeCount', e.target.value)} /></label>
+              <label className="full-width">Owners / Partners / Directors (name, PAN, shareholding, KYC/consent) <span className="required-asterisk">*</span><textarea required value={employment.additionalDetails?.ownersPartnersDirectors || ''} onChange={e => setEmploymentExtra('ownersPartnersDirectors', e.target.value)} /></label>
+              <label>Authorised Signatory <span className="required-asterisk">*</span><input required value={employment.additionalDetails?.authorizedSignatory || ''} onChange={e => setEmploymentExtra('authorizedSignatory', e.target.value)} /></label>
+              <label>Relationship with Applicant <span className="required-asterisk">*</span><input required value={employment.additionalDetails?.relationshipToApplicant || ''} onChange={e => setEmploymentExtra('relationshipToApplicant', e.target.value)} /></label>
               <h3 className="full-width">Financials & Tax</h3>
-              <label>Annual Turnover (last 2–3 years)<input value={employment.additionalDetails?.annualTurnover || ''} onChange={e => setEmploymentExtra('annualTurnover', e.target.value)} /></label>
-              <label>Gross Receipts<input type="number" min="0" value={employment.additionalDetails?.grossReceipts || ''} onChange={e => setEmploymentExtra('grossReceipts', e.target.value)} /></label>
-              <label>Net Profit / Income<input type="number" min="0" value={employment.additionalDetails?.netProfit || ''} onChange={e => setEmploymentExtra('netProfit', e.target.value)} /></label>
-              <label>Monthly Average Turnover<input type="number" min="0" value={employment.additionalDetails?.monthlyAverageTurnover || ''} onChange={e => setEmploymentExtra('monthlyAverageTurnover', e.target.value)} /></label>
-              <label>Net Worth<input type="number" min="0" value={employment.additionalDetails?.netWorth || ''} onChange={e => setEmploymentExtra('netWorth', e.target.value)} /></label>
-              <label>GST Registered?<select value={employment.additionalDetails?.gstRegistered || ''} onChange={e => setEmploymentExtra('gstRegistered', e.target.value)}><option value="">Select</option><option>Yes</option><option>No</option></select></label>
-              <label>GSTIN<input value={employment.additionalDetails?.gstin || ''} onChange={e => setEmploymentExtra('gstin', e.target.value.toUpperCase())} /></label>
-              <label>GST Return Filing Status<input value={employment.additionalDetails?.gstFilingStatus || ''} onChange={e => setEmploymentExtra('gstFilingStatus', e.target.value)} /></label>
-              <label>ITR Acknowledgement Number<input value={employment.additionalDetails?.itrNumber || ''} onChange={e => setEmploymentExtra('itrNumber', e.target.value)} /></label>
-              <label className="full-width">Existing Loans / Obligations<input value={employment.additionalDetails?.existingLoans || ''} onChange={e => setEmploymentExtra('existingLoans', e.target.value)} /></label>
-            </>}
-            </div></details>
+              <label>Annual Turnover (last 2–3 years) <span className="required-asterisk">*</span><input required value={employment.additionalDetails?.annualTurnover || ''} onChange={e => setEmploymentExtra('annualTurnover', e.target.value)} /></label>
+              <label>Gross Receipts <span className="required-asterisk">*</span><input required type="number" min="0" value={employment.additionalDetails?.grossReceipts || ''} onChange={e => setEmploymentExtra('grossReceipts', e.target.value)} /></label>
+              <label>Net Profit / Income <span className="required-asterisk">*</span><input required type="number" min="0" value={employment.additionalDetails?.netProfit || ''} onChange={e => setEmploymentExtra('netProfit', e.target.value)} /></label>
+              <label>Monthly Average Turnover <span className="required-asterisk">*</span><input required type="number" min="0" value={employment.additionalDetails?.monthlyAverageTurnover || ''} onChange={e => setEmploymentExtra('monthlyAverageTurnover', e.target.value)} /></label>
+              <label>Net Worth <span className="required-asterisk">*</span><input required type="number" min="0" value={employment.additionalDetails?.netWorth || ''} onChange={e => setEmploymentExtra('netWorth', e.target.value)} /></label>
+              <label>GST Registered? <span className="required-asterisk">*</span><select required value={employment.additionalDetails?.gstRegistered || ''} onChange={e => setEmploymentExtra('gstRegistered', e.target.value)}><option value="">Select</option><option>Yes</option><option>No</option></select></label>
+              {employment.additionalDetails?.gstRegistered === 'Yes' && <label>GSTIN <span className="required-asterisk">*</span><input required value={employment.additionalDetails?.gstin || ''} onChange={e => setEmploymentExtra('gstin', e.target.value.toUpperCase())} /></label>}
+              <label>GST Return Filing Status <span className="required-asterisk">*</span><input required value={employment.additionalDetails?.gstFilingStatus || ''} onChange={e => setEmploymentExtra('gstFilingStatus', e.target.value)} /></label>
+              <label>ITR Acknowledgement Number <span className="required-asterisk">*</span><input required value={employment.additionalDetails?.itrNumber || ''} onChange={e => setEmploymentExtra('itrNumber', e.target.value)} /></label>
+              <label className="full-width">Existing Loans / Obligations <span className="required-asterisk">*</span><input required value={employment.additionalDetails?.existingLoans || ''} onChange={e => setEmploymentExtra('existingLoans', e.target.value)} /></label>
+            </div>}
             <div className="eligibility-box">
               <h3>Initial affordability indicator</h3>
               <p>{Number(employment.monthlyInHandSalary || 0) > 0 ? 'Looking good — your income details are captured. Final affordability depends on existing obligations, bureau information and product policy.' : 'Add your monthly income to see an initial affordability indicator.'}</p>
@@ -1623,7 +1853,8 @@ function App() {
 
         <section className="card form-card" style={{display: (session.role === 'ADMIN' ? staffApplicationOpen : !showUserDashboard) && currentStep === 3 ? undefined : 'none'}} onBlurCapture={scheduleAutoSave}>
           <h2>Credit Score</h2>
-          <p className="credit-temp-id">Temporary Application ID: <strong>{applicationId ? `DRAFT-${applicationId}` : 'Creating draft…'}</strong></p>
+          <p className="credit-temp-id">Temporary Application ID: <strong>{applicationId ? `DRAFT-${applicationId}` : localDraftId || 'Creating draft…'}</strong></p>
+          {!applicationId && localDraftId && <p className="subtitle" role="status">Local-development draft only; not saved to the backend. Saving, uploading documents, and submitting still require a backend application.</p>}
           <div className="credit-mode-toggle" role="group" aria-label="Credit score entry mode">
             <button type="button" className={creditMode === 'MANUAL' ? 'primary' : 'secondary'} aria-pressed={creditMode === 'MANUAL'} onClick={() => { setCreditMode('MANUAL'); setApplicantExtra('creditScoreMode', 'MANUAL'); setValidationMessage(''); }}>Enter Manually</button>
             <button type="button" className={creditMode === 'ONLINE' ? 'primary' : 'secondary'} aria-pressed={creditMode === 'ONLINE'} onClick={() => { setCreditMode('ONLINE'); setApplicantExtra('creditScoreMode', 'ONLINE'); setValidationMessage(''); }}>Check Online</button>
@@ -1638,6 +1869,7 @@ function App() {
             <p className="subtitle">This is only an indicative classification. Manual entry does not perform a bureau check or verify eligibility.</p>
           </div> : <div className="credit-online-field">
             <div className="score-box"><div><span className="label">Bureau Credit Score</span><strong>{creditScore ?? '—'}</strong></div>{creditScore !== null && <span className="badge success">{creditScore >= 750 ? 'Excellent' : creditScore >= 700 ? 'Good' : creditScore >= 650 ? 'Fair' : 'Poor'}</span>}</div>
+            {creditUsingMock && <p className="subtitle" role="status">Mock credit score (750) for local development only — not bureau verified or saved to the backend.</p>}
             <button type="button" className="primary" disabled={isCheckingCredit || applicant.additionalDetails?.kycBureauConsent !== 'true'} onClick={() => void handleRunCreditCheck()}>{isCheckingCredit ? 'Checking…' : 'Fetch Credit Score from Bureau'}</button>
             <p className="subtitle">The online check starts only when you click this button after granting consent. Availability depends on the configured bureau provider.</p>
             {isCheckingCredit && <div className="verification-progress" role="status"><span className="spinner" /> Connecting to KYC and bureau provider…</div>}
@@ -1691,7 +1923,7 @@ function App() {
           <h2>Loan Details</h2>
           <div className="field-grid">
             <label>Loan Type
-              <select value={loanDetails.loanType} onChange={(e) => setLoanDetails({ ...loanDetails, loanType: e.target.value })}>
+              <select value={loanDetails.loanType} onChange={(e) => setLoanDetails({ ...loanDetails, loanType: e.target.value, interestRate: resolveInterestRate(e.target.value, '') })}>
                 <option value="PERSONAL_LOAN">Personal Loan</option>
                 <option value="HOME_LOAN">Home Loan</option>
                 <option value="CAR_LOAN">Car Loan</option>
@@ -1707,7 +1939,7 @@ function App() {
               {pricingPolicy.minAmount && pricingPolicy.maxAmount && <input type="range" min={pricingPolicy.minAmount} max={pricingPolicy.maxAmount} step={["HOME_LOAN", "CAR_LOAN", "VEHICLE_LOAN", "LOAN_AGAINST_PROPERTY"].includes(loanDetails.loanType) ? 10000 : 1000} value={Math.min(pricingPolicy.maxAmount, Math.max(pricingPolicy.minAmount, Number(loanDetails.requestedLoanAmount) || pricingPolicy.minAmount))} onChange={e => setLoanDetails({...loanDetails, requestedLoanAmount: Number(e.target.value)})} aria-label="Adjust loan amount" />}
             </label>
             <label>Preferred Tenure <span className="required-asterisk">*</span><select value={loanDetails.preferredTenure} onChange={e => setLoanDetails({...loanDetails, preferredTenure: Number(e.target.value)})}>{[6,12,18,24,36,48,60,84,120,180,240,300,360].filter(months => (!pricingPolicy.minTenure || months >= pricingPolicy.minTenure) && (!pricingPolicy.maxTenure || months <= pricingPolicy.maxTenure)).map(months => <option key={months} value={months}>{months} months ({(months/12).toFixed(1)} years)</option>)}</select></label>
-            <label>Your rate (% p.a.) <input value={formatInterestRate(loanDetails.interestRate)} readOnly aria-readonly="true" title="Calculated from the product rate card and applicable credit policy. Rate exceptions require approval." /></label>
+            <label>Your rate (% p.a.) <input value={formatInterestRate(effectiveInterestRate)} readOnly aria-readonly="true" title="Calculated from the product rate card and applicable credit policy. Personal Loans use 10.5% while pricing is pending or returns zero. Rate exceptions require approval." /></label>
             <label>Purpose of Loan<select value={(['Marriage','Illness','Higher Education','Home Purchase','Business','Vehicle Purchase','Debt Consolidation','Other'].includes(loanDetails.purposeOfLoan) ? loanDetails.purposeOfLoan : loanDetails.purposeOfLoan ? 'Other' : '')} onChange={e => setLoanDetails({...loanDetails, purposeOfLoan: e.target.value === 'Other' ? '' : e.target.value})}><option value="">Select purpose</option><option>Marriage</option><option>Illness</option><option>Higher Education</option><option>Home Purchase</option><option>Business</option><option>Vehicle Purchase</option><option>Debt Consolidation</option><option>Other</option></select></label><label>Purpose remark / Other purpose (optional)<input value={loanDetails.purposeOfLoan} placeholder="Describe the purpose if not listed" onChange={e => setLoanDetails({...loanDetails, purposeOfLoan: e.target.value})} /></label>
             <label>Net disbursal (₹)<input readOnly value={formatCurrency(calculatedFees.net)} /></label>
             <label>Rate type<input readOnly value={pricingPolicy.rateType === 'FIXED' ? 'Fixed' : 'Reducing balance'} /></label>
@@ -1844,7 +2076,7 @@ function App() {
           </section>
         )}
 
-        {(session.role === 'USER' ? !showUserDashboard : staffApplicationOpen) && !submittedApplication && <div className="inline-actions" style={{position:'sticky',bottom:0,background:'var(--surface, #fff)',padding:'12px 0',zIndex:5}}><button className="secondary" disabled={currentStep === 1} onClick={() => setCurrentStep(s => Math.max(1,s-1))}>Back</button><button className="secondary" onClick={() => void handleSaveDraft()} disabled={isCreatingApplication}>Save Draft</button><button className="primary" disabled={Boolean(continueDisabledReason)} title={continueDisabledReason || undefined} onClick={() => { if (currentStep === 1) { if (hasMissingRequiredContactDetails()) { setValidationMessage('Complete all required contact and additional details before continuing.'); return; } const errors = [!applicant.fullName && 'Full name is required', !validPan(applicant.panNumber) && 'PAN should look like ABCDE1234F', !validEmail(applicant.email) && 'Enter a valid email address', !applicant.workEmail && 'Work email is required', !validEmail(applicant.workEmail) && 'Enter a valid work email address', !/^[1-9][0-9]{5}$/.test(applicant.pincode) && 'Enter a valid 6-digit PIN code'].filter(Boolean); if (errors.length) { setValidationMessage(errors.join('. ')); return; } } if (currentStep === 2 && (loanValidationMessage || loanExtraValidationMessage)) { setValidationMessage(loanValidationMessage || loanExtraValidationMessage); return; } if (currentStep === 4 && requiredDocumentsNotUploaded.length > 0) { setValidationMessage(`Upload all required documents before continuing: ${requiredDocumentsNotUploaded.map(doc => doc.label).join(', ')}.`); return; } if (currentStep < 5) { setHighestUnlockedStep(s => Math.max(s, currentStep + 1)); setCurrentStep(s => s+1); setValidationMessage(''); } else void handleSubmit(); }}>{currentStep === 5 ? 'Submit Application' : 'Continue'}</button><span style={{alignSelf:'center',fontSize:12,color:'#64748b'}}>Step {currentStep} of 5 · {saveIndicator || (applicationId ? 'Saved draft' : 'Not saved yet')}{continueDisabledReason ? ` · ${continueDisabledReason}` : ''}</span></div>}
+        {(session.role === 'USER' ? !showUserDashboard : staffApplicationOpen) && !submittedApplication && <div className="inline-actions" style={{position:'sticky',bottom:0,background:'var(--surface, #fff)',padding:'12px 0',zIndex:5}}><button className="secondary" disabled={currentStep === 1} onClick={() => setCurrentStep(s => Math.max(1,s-1))}>Back</button><button className="secondary" onClick={() => void handleSaveDraft()} disabled={isCreatingApplication}>Save Draft</button><button className="primary" disabled={currentStep !== 1 && Boolean(continueDisabledReason)} title={continueDisabledReason || undefined} onClick={handleContinue}>{currentStep === 5 ? 'Submit Application' : 'Continue'}</button><span style={{alignSelf:'center',fontSize:12,color:'#64748b'}}>Step {currentStep} of 5 · {saveIndicator || (applicationId ? 'Saved draft' : 'Not saved yet')}{continueDisabledReason ? ` · ${continueDisabledReason}` : ''}</span></div>}
         {session.role === 'ADMIN' && !staffApplicationOpen && !showUnderwriting && (
           <section className="card table-card">
             <div className="inline-actions" style={{justifyContent:"space-between",alignItems:"center"}}><h2>Recent Applications</h2><button type="button" className="primary" onClick={handleNewApplication}>+ New Application</button></div>
