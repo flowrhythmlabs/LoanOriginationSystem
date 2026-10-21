@@ -81,6 +81,10 @@ public class MockSignzyKycProvider implements KycProvider {
         fields.put("fatherName", "Suresh Sharma");
         fields.put("residentialAddress", "123 Main Street, Varanasi, UP, 221006");
         fields.put("panNumber", "ABCDE1234F");
+        if ("AADHAAR".equals(documentType)) {
+            fields.put("aadhaarNumber", number != null && number.matches("[2-9][0-9]{11}")
+                    ? "XXXXXXXX" + number.substring(8) : "XXXXXXXX9012");
+        }
         log.info("Mock identity extraction returned demo details for documentType={}", documentType);
         return fields;
     }

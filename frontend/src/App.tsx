@@ -1,8 +1,9 @@
+/// <reference types="vite/client" />
 import { UnderwritingWorkspace } from './UnderwritingWorkspace';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { LoginPage } from './LoginPage';
 import { buildAuthHeaders, clearAuth, readStoredAuth, type AuthSession } from './auth';
-import { ALLOWED_FILE_TYPES, MAX_FILE_SIZE, maskAadhaar, readIdentityFields, validateIdentity, validateIdentityFile, type IdentityFields, type IdentityField, type IdentityType } from './identity';
+import { ALLOWED_FILE_TYPES, MAX_FILE_SIZE, maskAadhaar, maskAadhaarEntry, editAadhaarEntry, mockIdentityFields, readIdentityFields, validateIdentity, validateIdentityFile, type IdentityFields, type IdentityField, type IdentityType } from './identity';
 
 type Applicant = {
   fullName: string;
@@ -232,6 +233,9 @@ function App() {
   const [identityConsent, setIdentityConsent] = useState(false);
   const [identityLoading, setIdentityLoading] = useState(false);
   const [identityError, setIdentityError] = useState('');
+  const [identityUsingMock, setIdentityUsingMock] = useState(false);
+  const [pincodeMessage, setPincodeMessage] = useState('');
+  const pincodeCacheRef = useRef(new Map<string, { city: string; state: string }>());
   const [identityFetched, setIdentityFetched] = useState<IdentityFields>({});
   const identityRequestRef = useRef<AbortController | null>(null);
   const identityFileRef = useRef<HTMLInputElement | null>(null);
@@ -284,6 +288,58 @@ function App() {
     return response;
   };
 
+  useEffect(() => {
+    setPincodeMessage('');
+    if (!session || !/^[1-9][0-9]{5}$/.test(applicant.pincode)) return;
+    const controller = new AbortController();
+    const { pincode, city, state } = applicant;
+    let timeout: number | undefined;
+    const timer = window.setTimeout(async () => {
+      setPincodeMessage('Looking up City and State...');
+      try {
+        let location = pincodeCacheRef.current.get(pincode);
+        if (!location) {
+          timeout = window.setTimeout(() => controller.abort(), 10000);
+          const response = await fetch(`https://api.postalpincode.in/pincode/${pincode}`, { signal: controller.signal });
+          if (!response.ok) throw new Error('Postal lookup unavailable.');
+          const payload: unknown = await response.json();
+          const result: unknown = Array.isArray(payload) ? payload[0] : null;
+          const offices: unknown = result && typeof result === 'object'
+            && 'Status' in result && result.Status === 'Success' && 'PostOffice' in result ? result.PostOffice : null;
+          const office = Array.isArray(offices) ? offices.find((entry: unknown): entry is { District: string; State: string } =>
+            entry !== null && typeof entry === 'object' && 'District' in entry && 'State' in entry
+            && typeof entry.District === 'string' && Boolean(entry.District.trim())
+            && typeof entry.State === 'string' && Boolean(entry.State.trim())) : null;
+          if (!office) throw new Error('No postal location returned.');
+          const matchedState = INDIA_STATES.find(value => value.toLowerCase() === office.State.toLowerCase());
+          if (!matchedState) throw new Error('Postal State is not supported.');
+          location = { city: office.District.trim(), state: matchedState };
+          pincodeCacheRef.current.set(pincode, location);
+        }
+        if (controller.signal.aborted) return;
+        const resolved = location;
+        setApplicant(previous => previous.pincode !== pincode ? previous : {
+          ...previous,
+          city: previous.city === city ? resolved.city : previous.city,
+          state: previous.state === state ? resolved.state : previous.state
+        });
+        setPincodeMessage('Postal City/district and State found. Please review; both remain editable.');
+      } catch {
+        if (!controller.signal.aborted || timeout !== undefined) {
+          setPincodeMessage('City and State could not be looked up. Please enter them manually.');
+        }
+      } finally {
+        window.clearTimeout(timeout);
+      }
+    }, 500);
+    return () => {
+      window.clearTimeout(timer);
+      window.clearTimeout(timeout);
+      timeout = undefined;
+      controller.abort();
+    };
+  }, [applicant.pincode, applicationId, session]);
+
   const resetIdentity = () => {
     identityRequestRef.current?.abort();
     identityRequestRef.current = null;
@@ -293,6 +349,7 @@ function App() {
     setIdentityConsent(false);
     setIdentityLoading(false);
     setIdentityError('');
+    setIdentityUsingMock(false);
     setIdentityFetched({});
     if (identityFileRef.current) identityFileRef.current.value = '';
   };
@@ -331,6 +388,7 @@ function App() {
     const controller = new AbortController();
     identityRequestRef.current = controller;
     setIdentityLoading(true);
+    setIdentityUsingMock(false);
     const applicantAtFetch = applicant;
     let timedOut = false;
     const timeout = window.setTimeout(() => {
@@ -343,19 +401,28 @@ function App() {
       body.append('consent', 'true');
       if (identityFile) body.append('file', identityFile);
       else body.append('number', number);
-      const response = await apiFetch('/api/kyc/identity', { method: 'POST', body, signal: controller.signal });
-      if (controller.signal.aborted) return;
-      if (!response.ok) {
-        setIdentityError(response.status === 401
+      let fields: IdentityFields;
+      try {
+        const response = await apiFetch('/api/kyc/identity', { method: 'POST', body, signal: controller.signal });
+        if (controller.signal.aborted) throw new Error('Identity request cancelled.');
+        if (!response.ok) {
+          throw new Error(response.status === 401
           ? 'Your session expired. Please sign in again. Your entered details have not been cleared.'
           : response.status === 503
             ? 'Aadhaar/PAN identity fetching is currently unavailable. Please enter your details manually. Your entered details have not been cleared.'
             : 'Identity details could not be fetched. Please try again later or enter your details manually. Your entered details have not been cleared.');
-        return;
+        }
+        fields = readIdentityFields(await response.json());
+        if (import.meta.env.DEV && identityType === 'AADHAAR' && !fields.aadhaarNumber) {
+          throw new Error('Aadhaar extraction did not return a document number.');
+        }
+      } catch (error) {
+        if (!import.meta.env.DEV || (controller.signal.aborted && !timedOut)) throw error;
+        console.warn('Identity extraction unavailable; using local development demo details.', error);
+        fields = mockIdentityFields();
+        setIdentityUsingMock(true);
       }
-      const payload: unknown = await response.json();
-      const fields = readIdentityFields(payload);
-      if (controller.signal.aborted) return;
+      if (controller.signal.aborted && !timedOut) return;
       setApplicant(previous => {
         const next = { ...previous, additionalDetails: { ...previous.additionalDetails } };
         for (const [key, value] of Object.entries(fields)) {
@@ -376,11 +443,12 @@ function App() {
         return next;
       });
       setIdentityFetched(previous => ({ ...previous, ...fields }));
-    } catch {
+    } catch (error) {
       if (timedOut && identityRequestRef.current === controller) {
         setIdentityError('Identity fetching took too long. Please retry or enter your details manually. Your entered details have not been cleared.');
       } else if (!controller.signal.aborted) {
-        setIdentityError('Identity details could not be fetched. Please try again later or enter your details manually. Your entered details have not been cleared.');
+        setIdentityError(error instanceof Error && !(error instanceof TypeError) && !(error instanceof SyntaxError)
+          ? error.message : 'Identity details could not be fetched. Please try again later or enter your details manually. Your entered details have not been cleared.');
       }
     } finally {
       window.clearTimeout(timeout);
@@ -1119,7 +1187,7 @@ function App() {
           <div className="card metric"><span>Submitted Applications</span><strong>{applications.filter((item) => item.status === 'SUBMITTED').length}</strong></div>
         </section>}
 
-        <section className="card form-card" style={{display: (session.role === 'ADMIN' ? staffApplicationOpen : !showUserDashboard) && currentStep === 1 ? undefined : 'none'}} onBlurCapture={scheduleAutoSave}>
+        <section className="card form-card" style={{display: (session.role === 'ADMIN' ? staffApplicationOpen : !showUserDashboard) && currentStep === 1 ? undefined : 'none', paddingBottom: 96, scrollPaddingBottom: 96}} onBlurCapture={scheduleAutoSave}>
           <h2>Applicant Details</h2>
           <fieldset className="identity-block" aria-busy={identityLoading}>
             <legend>Identity</legend>
@@ -1137,8 +1205,18 @@ function App() {
                 setIdentityPanNumber(event.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''));
                 setIdentityConsent(false);
               }} onBlur={() => setValidationMessage(identityPanNumber && !validPan(identityPanNumber) ? "PAN should look like ABCDE1234F." : "")} />{identityPanNumber && !validPan(identityPanNumber) && <small className="field-error">PAN should look like ABCDE1234F.</small>}</label>}
-              {identityType === 'AADHAAR' && <label className="required-contact-block">Aadhaar Number<input type="password" autoComplete="off" inputMode="numeric" maxLength={12} disabled={identityLoading} value={applicant.additionalDetails?.aadhaarNumber || ''} onChange={event => {
-                setApplicantExtra('aadhaarNumber', event.target.value.replace(/\D/g, '').slice(0,12));
+              {identityType === 'AADHAAR' && <label className="required-contact-block">Aadhaar Number<input
+                type="text"
+                autoComplete="off" inputMode="numeric"
+                maxLength={applicant.additionalDetails?.aadhaarNumber?.startsWith('XXXXXXXX') ? 14 : 12}
+                disabled={identityLoading}
+                readOnly={isIdentityFetched('aadhaarNumber') && !identityError}
+                value={applicant.additionalDetails?.aadhaarNumber?.startsWith('XXXXXXXX')
+                  ? maskAadhaar(applicant.additionalDetails.aadhaarNumber).replace('XXXXXXXX', '\u2022\u2022\u2022\u2022 \u2022\u2022\u2022\u2022 ')
+                  : maskAadhaarEntry(applicant.additionalDetails?.aadhaarNumber || '')}
+                onFocus={event => { if (applicant.additionalDetails?.aadhaarNumber?.startsWith('XXXXXXXX')) event.target.select(); }}
+                onChange={event => {
+                setApplicantExtra('aadhaarNumber', editAadhaarEntry(applicant.additionalDetails?.aadhaarNumber || '', event.target.value));
                 if (identityType === 'AADHAAR') setIdentityConsent(false);
               }} />{applicant.additionalDetails?.aadhaarNumber && <small className="field-hint">{maskAadhaar(applicant.additionalDetails.aadhaarNumber)}</small>}{identityTag('aadhaarNumber')}</label>}
               <div className="full-width identity-upload" onDragOver={event => event.preventDefault()} onDrop={event => {
@@ -1154,13 +1232,11 @@ function App() {
             <button type="button" disabled={identityLoading || !identityConsent} onClick={() => void fetchIdentity()}>{identityLoading && <span className="identity-spinner" aria-hidden="true" />}{identityLoading ? 'Fetching identity details...' : 'Fetch identity details'}</button>
             {identityLoading && <p className="field-hint" role="status">Extracting identity details. You can continue entering applicant details below.</p>}
             {identityError && <div className="validation-box" role="alert">{identityError}</div>}
+            {identityUsingMock && <p className="field-hint" role="status">Using local development demo identity details, not a verified Aadhaar/PAN lookup.</p>}
             {identityFilledCount > 0 && <p className="field-success" role="status">{identityFilledCount} fields filled &ndash; please review</p>}
           </fieldset>
           <div className="field-grid">
             <label>Full Name <span className="required-asterisk">*</span><input value={applicant.fullName} onChange={(e) => setApplicant({ ...applicant, fullName: e.target.value.replace(/[^A-Za-z .'-]/g, '') })} onBlur={(e) => { if (e.target.value && !validName(e.target.value)) setValidationMessage("Name should contain letters only."); }} />{applicant.fullName && !validName(applicant.fullName) && <small className="field-error">Name should contain letters only.</small>}{identityTag('fullName')}</label>
-            <label>PAN Number <span className="required-asterisk">*</span><input maxLength={10} value={applicant.panNumber} onChange={event => {
-              setApplicant({ ...applicant, panNumber: event.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '') });
-            }} onBlur={() => setValidationMessage(applicant.panNumber && !validPan(applicant.panNumber) ? "PAN should look like ABCDE1234F." : "")} />{applicant.panNumber && !validPan(applicant.panNumber) && <small className="field-error">PAN should look like ABCDE1234F.</small>}{identityTag('panNumber')}</label>
             <label>Date of Birth <span className="required-asterisk">*</span><input type="date" max={new Date().toISOString().slice(0,10)} value={applicant.dateOfBirth} onChange={(e) => setApplicant({ ...applicant, dateOfBirth: e.target.value })} />{identityTag('dateOfBirth')}</label><label>Age<input readOnly value={calculateAge(applicant.dateOfBirth)} />{identityTag('dateOfBirth')}</label>
             <label>Mobile Number <span className="required-asterisk">*</span><input
               type="tel"
@@ -1186,13 +1262,24 @@ function App() {
             />{applicantMobileError && <span role="alert" style={{ color: '#a61d1d', fontSize: 12 }}>{applicantMobileError}</span>}{identityTag('mobileNumber')}</label>
             <label>Email ID <span className="required-asterisk">*</span><input type="email" value={applicant.email} onChange={(e) => setApplicant({ ...applicant, email: e.target.value })} onBlur={() => setValidationMessage(applicant.email && !validEmail(applicant.email) ? "Enter a valid email address." : "")} />{applicant.email && !validEmail(applicant.email) && <small className="field-error">Enter a valid email address.</small>}{identityTag('email')}</label>
             <label>Work Email ID <span className="required-asterisk">*</span><input type="email" value={applicant.workEmail} onChange={(e) => setApplicant({ ...applicant, workEmail: e.target.value })} onBlur={() => setValidationMessage(applicant.workEmail && !validEmail(applicant.workEmail) ? "Enter a valid work email address." : "")} />{applicant.workEmail && !validEmail(applicant.workEmail) && <small className="field-error">Enter a valid work email address.</small>}{identityTag('workEmail')}</label>
-            <details className="full-width required-contact-block"><summary>Contact details</summary><div className="field-grid">
-            <label className="full-width">Residential Address<input value={applicant.residentialAddress} onChange={(e) => setApplicant({ ...applicant, residentialAddress: e.target.value })} />{identityTag('residentialAddress')}</label>
-            <label>City<input value={applicant.city} onChange={(e) => setApplicant({ ...applicant, city: e.target.value })} />{identityTag('city')}</label>
-            <label>State<select value={applicant.state} onChange={(e) => setApplicant({ ...applicant, state: e.target.value })}><option value="">Select state</option>{INDIA_STATES.map(state => <option key={state} value={state}>{state}</option>)}</select>{identityTag('state')}</label>
-            <label>Pincode <span className="required-asterisk">*</span><input inputMode="numeric" maxLength={6} value={applicant.pincode} onChange={(e) => setApplicant({ ...applicant, pincode: e.target.value.replace(/\D/g, '').slice(0,6) })} onBlur={() => setValidationMessage(applicant.pincode && !/^[1-9][0-9]{5}$/.test(applicant.pincode) ? "PIN code must be a valid 6-digit Indian PIN code." : "")} />{applicant.pincode && !/^[1-9][0-9]{5}$/.test(applicant.pincode) && <small className="field-error">Enter a valid 6-digit PIN code.</small>}{identityTag('pincode')}</label>
-            </div></details>
-            <details className="full-width required-contact-block"><summary>Additional personal, identity, bank, co-applicant and guarantor details</summary><div className="field-grid">
+            <section className="full-width card form-card required-contact-block" aria-label="Contact details"><h3>Contact details</h3><div className="field-grid">
+            <label className="full-width"><span>Residential Address <span className="required-asterisk">*</span></span><input required maxLength={250} value={applicant.residentialAddress} onChange={(e) => setApplicant({ ...applicant, residentialAddress: e.target.value })} /><small className="field-hint">{applicant.residentialAddress.length}/250 characters</small>{identityTag('residentialAddress')}</label>
+            <label>City <span className="required-asterisk">*</span><input required value={applicant.city} onChange={(e) => setApplicant({ ...applicant, city: e.target.value })} />{identityTag('city')}</label>
+            <label>State <span className="required-asterisk">*</span><select required value={applicant.state} onChange={(e) => setApplicant({ ...applicant, state: e.target.value })}><option value="">Select state</option>{INDIA_STATES.map(state => <option key={state} value={state}>{state}</option>)}</select>{identityTag('state')}</label>
+            <label>Pincode <span className="required-asterisk">*</span><input required inputMode="numeric" minLength={6} maxLength={6} pattern="[1-9][0-9]{5}" value={applicant.pincode} onChange={(e) => setApplicant({ ...applicant, pincode: e.target.value.replace(/\D/g, '').slice(0,6) })} onBlur={() => setValidationMessage(applicant.pincode && !/^[1-9][0-9]{5}$/.test(applicant.pincode) ? "PIN code must be a valid 6-digit Indian PIN code." : "")} />{applicant.pincode && !/^[1-9][0-9]{5}$/.test(applicant.pincode) && <small className="field-error">Enter a valid 6-digit PIN code.</small>}{identityTag('pincode')}</label>
+            {pincodeMessage && <p className="full-width field-hint" role="status">{pincodeMessage}</p>}
+            </div></section>
+            <section className="full-width card form-card required-contact-block" aria-label="Address Details"><h3>Address Details</h3><div className="field-grid">
+            <label><span>Years at Current Address</span><span style={{ display: 'flex', alignItems: 'center', gap: 8 }}><input inputMode="numeric" pattern="[0-9]*" value={applicant.additionalDetails?.yearsAtAddress || ''} onChange={e => setApplicantExtra('yearsAtAddress', e.target.value.replace(/\D/g, ''))} /><span aria-hidden="true">years</span></span></label>
+            <label className="full-width"><span>Permanent Address <span className="required-asterisk">*</span></span><input required value={applicant.additionalDetails?.permanentAddress || ''} maxLength={250} onChange={e => setApplicantExtra('permanentAddress', e.target.value)} /><small className="field-hint">{(applicant.additionalDetails?.permanentAddress || '').length}/250 characters</small>{identityTag('permanentAddress')}</label>
+            <label>Address Proof Type<select value={applicant.additionalDetails?.addressProofType || ''} onChange={e => setApplicantExtra('addressProofType', e.target.value)}>
+              <option value="">Select address proof</option>
+              {applicant.additionalDetails?.addressProofType && !['Aadhaar Card', 'Passport', 'Voter ID', 'Utility Bill', 'Driving License'].includes(applicant.additionalDetails.addressProofType) && <option>{applicant.additionalDetails.addressProofType}</option>}
+              <option>Aadhaar Card</option><option>Passport</option><option>Voter ID</option><option>Utility Bill</option><option>Driving License</option>
+            </select></label>
+            </div></section>
+            <div className="full-width required-contact-block">
+            <section className="card form-card" aria-label="Additional personal details"><h3>Additional personal details</h3><div className="field-grid">
             <label>Gender<select value={applicant.additionalDetails?.gender || ''} onChange={e => setApplicantExtra('gender', e.target.value)}><option value="">Select</option><option>Female</option><option>Male</option><option>Other</option></select>{identityTag('gender')}</label>
             <label>Father's Name<input value={applicant.additionalDetails?.fatherName || ''} onChange={e => setApplicantExtra('fatherName', e.target.value.replace(/[^A-Za-z .'-]/g,''))} />{identityTag('fatherName')}</label>
             <label>Mother's Name<input value={applicant.additionalDetails?.motherName || ''} onChange={e => setApplicantExtra('motherName', e.target.value.replace(/[^A-Za-z .'-]/g,''))} />{identityTag('motherName')}</label>
@@ -1201,22 +1288,28 @@ function App() {
             <label>Nationality<input value={applicant.additionalDetails?.nationality || ''} onChange={e => setApplicantExtra('nationality', e.target.value.replace(/[^A-Za-z .'-]/g, ''))} />{identityTag('nationality')}</label>
             <label>Residential Status<select value={applicant.additionalDetails?.residentialStatus || ''} onChange={e => setApplicantExtra('residentialStatus', e.target.value)}><option value="Resident">Resident</option><option value="NRI">NRI</option><option value="Other">Other</option></select>{identityTag('residentialStatus')}</label>
             <label>Highest Education Qualification<input value={applicant.additionalDetails?.education || ''} onChange={e => setApplicantExtra('education', e.target.value)} />{identityTag('education')}</label>
-            <label>Alternate ID Type<select value={applicant.additionalDetails?.alternateIdType || ''} onChange={e => setApplicantExtra('alternateIdType', e.target.value)}><option value="">Select</option><option>Voter ID</option><option>Driving Licence</option><option>Passport</option></select></label>
-            <label>Alternate ID Number<input value={applicant.additionalDetails?.alternateIdNumber || ''} onChange={e => setApplicantExtra('alternateIdNumber', e.target.value)} /></label>
             <label>Alternate Mobile<input inputMode="numeric" maxLength={10} value={applicant.additionalDetails?.alternateMobile || ''} onChange={e => setApplicantExtra('alternateMobile', e.target.value.replace(/\D/g,'').slice(0,10))} />{identityTag('alternateMobile')}</label>
             <label>Residence Type<select value={applicant.additionalDetails?.currentResidenceType || ''} onChange={e => setApplicantExtra('currentResidenceType', e.target.value)}><option value="">Select</option><option>Owned</option><option>Rented</option></select></label>
-            <label>Years at Current Address<input type="number" min="0" value={applicant.additionalDetails?.yearsAtAddress || ''} onChange={e => setApplicantExtra('yearsAtAddress', e.target.value)} /></label>
             {applicant.additionalDetails?.currentResidenceType === 'Rented' && <label>Monthly Rent<input type="number" min="0" value={applicant.additionalDetails?.monthlyRent || ''} onChange={e => setApplicantExtra('monthlyRent', e.target.value)} /></label>}
-            <label className="full-width"><span>Permanent Address <span className="required-asterisk">*</span></span><input readOnly={applicant.additionalDetails?.sameAsCurrentAddress === 'true'} value={applicant.additionalDetails?.sameAsCurrentAddress === 'true' ? applicant.residentialAddress : (applicant.additionalDetails?.permanentAddress || '')} maxLength={250} onChange={e => setApplicantExtra('permanentAddress', e.target.value)} /><small className="field-hint">{(applicant.additionalDetails?.permanentAddress || '').length}/250 characters</small>{applicant.additionalDetails?.sameAsCurrentAddress === 'true' ? identityTag('residentialAddress') : identityTag('permanentAddress')}</label>
-            <label className="full-width"><input type="checkbox" checked={applicant.additionalDetails?.sameAsCurrentAddress === 'true'} onChange={e => { setApplicantExtra('sameAsCurrentAddress', String(e.target.checked)); if (e.target.checked) setApplicantExtra('permanentAddress', applicant.residentialAddress); }} /> Permanent address is same as current address</label>
-            <label>Address Proof Type<input value={applicant.additionalDetails?.addressProofType || ''} onChange={e => setApplicantExtra('addressProofType', e.target.value)} /></label>
+            </div></section>
+            <section className="card form-card" aria-label="Identity details"><h3>Identity</h3><div className="field-grid">
+            <label>PAN Number <span className="required-asterisk">*</span><input maxLength={10} value={applicant.panNumber} onChange={event => {
+              setApplicant({ ...applicant, panNumber: event.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '') });
+            }} onBlur={() => setValidationMessage(applicant.panNumber && !validPan(applicant.panNumber) ? "PAN should look like ABCDE1234F." : "")} />{applicant.panNumber && !validPan(applicant.panNumber) && <small className="field-error">PAN should look like ABCDE1234F.</small>}{identityTag('panNumber')}</label>
+            <label>Alternate ID Type<select value={applicant.additionalDetails?.alternateIdType || ''} onChange={e => setApplicantExtra('alternateIdType', e.target.value)}><option value="">Select</option><option>Voter ID</option><option>Driving Licence</option><option>Passport</option></select></label>
+            <label>Alternate ID Number<input value={applicant.additionalDetails?.alternateIdNumber || ''} onChange={e => setApplicantExtra('alternateIdNumber', e.target.value)} /></label>
+            </div></section>
+            <section className="card form-card" aria-label="Bank details"><h3>Bank details</h3><div className="field-grid">
             <label>Account Holder Name<input value={applicant.additionalDetails?.accountHolderName || ''} onChange={e => setApplicantExtra('accountHolderName', e.target.value.replace(/[^A-Za-z .'-]/g, ''))} /></label>
             <label>Bank Account Number<input inputMode="numeric" value={applicant.additionalDetails?.accountNumber || ''} onChange={e => setApplicantExtra('accountNumber', e.target.value.replace(/\D/g,''))} /></label>
             <label>IFSC Code<span className="ifsc-input-wrap"><input maxLength={11} value={applicant.additionalDetails?.ifscCode || ''} onChange={e => setApplicantExtra('ifscCode', e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))} onBlur={() => setIfscMessages(prev => ({...prev, applicant: applicant.additionalDetails?.ifscCode && !/^[A-Z]{4}0[A-Z0-9]{6}$/.test(applicant.additionalDetails.ifscCode) ? {text:'IFSC must be 11 characters, e.g. ABCD0123456.',error:true} : {text:'',error:false}}))} /><button type="button" className="secondary ifsc-finder" onClick={() => void lookupIfsc('applicant', applicant.additionalDetails?.ifscCode || '', 'bankName', 'bankBranch')}>Find IFSC</button></span>{ifscMessages.applicant?.text && <small className={ifscMessages.applicant.error ? 'field-error' : 'field-success'}>{ifscMessages.applicant.text}</small>}</label>
             <label>Bank Name<input value={applicant.additionalDetails?.bankName || ''} onChange={e => setApplicantExtra('bankName', e.target.value)} /></label>
             <label>Bank Branch<input value={applicant.additionalDetails?.bankBranch || ''} onChange={e => setApplicantExtra('bankBranch', e.target.value)} /></label>
-            <label>Account Type<select value={applicant.additionalDetails?.accountType || ''} onChange={e => setApplicantExtra('accountType', e.target.value)}><option value="">Select</option><option>Savings</option><option>Current</option></select></label><label className="checkbox-field inline-checkbox-field"><input type="checkbox" checked={applicant.additionalDetails?.coApplicantRequired === 'true'} onChange={e => setApplicantExtra('coApplicantRequired', String(e.target.checked))} /> Include a co-applicant</label>
+            <label>Account Type<select value={applicant.additionalDetails?.accountType || ''} onChange={e => setApplicantExtra('accountType', e.target.value)}><option value="">Select</option><option>Savings</option><option>Current</option></select></label>
             <label>Salary Account<select value={applicant.additionalDetails?.salaryAccount || ''} onChange={e => setApplicantExtra('salaryAccount', e.target.value)}><option value="">Select</option><option>Yes</option><option>No</option></select></label>
+            </div></section>
+            <section className="card form-card" aria-label="Co-applicant details"><h3>Co-applicant details</h3><div className="field-grid">
+            <label className="checkbox-field inline-checkbox-field"><input type="checkbox" checked={applicant.additionalDetails?.coApplicantRequired === 'true'} onChange={e => setApplicantExtra('coApplicantRequired', String(e.target.checked))} /> Include a co-applicant</label>
             {applicant.additionalDetails?.coApplicantRequired === 'true' && <>
             <label>Co-applicant Name<input value={applicant.additionalDetails?.coApplicantName || ''} onChange={e => setApplicantExtra('coApplicantName', e.target.value.replace(/[^A-Za-z .'-]/g, ''))} /></label>
             <label>Co-applicant Relationship<input value={applicant.additionalDetails?.coApplicantRelationship || ''} onChange={e => setApplicantExtra('coApplicantRelationship', e.target.value.replace(/[^A-Za-z .'-]/g, ''))} /></label>
@@ -1229,13 +1322,6 @@ function App() {
             <label className="full-width">Co-applicant Address<input value={applicant.additionalDetails?.coApplicantAddress || ''} onChange={e => setApplicantExtra('coApplicantAddress', e.target.value)} /></label>
             <label>Co-applicant KYC/Bureau Consent<select value={applicant.additionalDetails?.coApplicantConsent || 'false'} onChange={e => setApplicantExtra('coApplicantConsent', e.target.value)}><option value="false">Not provided</option><option value="true">Consented</option></select></label><label>Co-applicant KYC Status<input readOnly value={applicant.additionalDetails?.coApplicantKycStatus || 'Not started'} /></label>
             </>}
-            <label>Guarantor Name (if required)<input value={applicant.additionalDetails?.guarantorName || ''} onChange={e => setApplicantExtra('guarantorName', e.target.value.replace(/[^A-Za-z .'-]/g, ''))} /></label>
-            <label>Guarantor Relationship<input value={applicant.additionalDetails?.guarantorRelationship || ''} onChange={e => setApplicantExtra('guarantorRelationship', e.target.value.replace(/[^A-Za-z .'-]/g, ''))} /></label>
-            <label>Guarantor PAN<input maxLength={10} value={applicant.additionalDetails?.guarantorPan || ''} onChange={e => setApplicantExtra('guarantorPan', e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))} />{applicant.additionalDetails?.guarantorPan && !validPan(applicant.additionalDetails.guarantorPan) && <small className="field-error">PAN should look like ABCDE1234F.</small>}</label>
-            <label>Guarantor Mobile<input inputMode="numeric" maxLength={10} value={applicant.additionalDetails?.guarantorMobile || ''} onChange={e => setApplicantExtra('guarantorMobile', e.target.value.replace(/\D/g,'').slice(0,10))} /></label>
-            <label>Guarantor Email<input type="email" value={applicant.additionalDetails?.guarantorEmail || ''} onChange={e => setApplicantExtra('guarantorEmail', e.target.value)} onBlur={() => setValidationMessage(applicant.additionalDetails?.guarantorEmail && !validEmail(applicant.additionalDetails.guarantorEmail) ? 'Enter a valid guarantor email address.' : '')} />{applicant.additionalDetails?.guarantorEmail && !validEmail(applicant.additionalDetails.guarantorEmail) && <small className="field-error">Enter a valid guarantor email address.</small>}</label>
-            <label className="full-width">Guarantor Address<input value={applicant.additionalDetails?.guarantorAddress || ''} onChange={e => setApplicantExtra('guarantorAddress', e.target.value)} /></label>
-            <label>Guarantor KYC/Bureau Consent<select value={applicant.additionalDetails?.guarantorConsent || 'false'} onChange={e => setApplicantExtra('guarantorConsent', e.target.value)}><option value="false">Not provided</option><option value="true">Consented</option></select></label><label>Guarantor KYC Status<input readOnly value={applicant.additionalDetails?.guarantorKycStatus || 'Not started'} /></label>
             {applicant.additionalDetails?.coApplicantRequired === 'true' && <>
             <label>Co-applicant Date of Birth<input type="date" max={new Date().toISOString().slice(0,10)} value={applicant.additionalDetails?.coApplicantDob || ''} onChange={e => setApplicantExtra('coApplicantDob', e.target.value)} /></label>
             <label>Co-applicant Age<input readOnly value={calculateAge(applicant.additionalDetails?.coApplicantDob || '')} /></label>
@@ -1263,6 +1349,15 @@ function App() {
             <label>Co-applicant IFSC<span className="ifsc-input-wrap"><input maxLength={11} value={applicant.additionalDetails?.coApplicantIfsc || ''} onChange={e => setApplicantExtra('coApplicantIfsc', e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))} /><button type="button" className="secondary ifsc-finder" onClick={() => void lookupIfsc('coApplicant', applicant.additionalDetails?.coApplicantIfsc || '', 'coApplicantBank', 'coApplicantBranch')}>Find IFSC</button></span>{ifscMessages.coApplicant?.text && <small className={ifscMessages.coApplicant.error ? 'field-error' : 'field-success'}>{ifscMessages.coApplicant.text}</small>}</label>
             <label>Co-applicant Bank Name<input value={applicant.additionalDetails?.coApplicantBank || ''} onChange={e => setApplicantExtra('coApplicantBank', e.target.value)} /></label><label>Co-applicant Branch<input value={applicant.additionalDetails?.coApplicantBranch || ''} onChange={e => setApplicantExtra('coApplicantBranch', e.target.value)} /></label><label>Co-applicant Account Type<select value={applicant.additionalDetails?.coApplicantAccountType || ''} onChange={e => setApplicantExtra('coApplicantAccountType', e.target.value)}><option value="">Select</option><option>Savings</option><option>Current</option></select></label>
             </>}
+            </div></section>
+            <section className="card form-card" aria-label="Guarantor details"><h3>Guarantor details</h3><div className="field-grid">
+            <label>Guarantor Name (if required)<input value={applicant.additionalDetails?.guarantorName || ''} onChange={e => setApplicantExtra('guarantorName', e.target.value.replace(/[^A-Za-z .'-]/g, ''))} /></label>
+            <label>Guarantor Relationship<input value={applicant.additionalDetails?.guarantorRelationship || ''} onChange={e => setApplicantExtra('guarantorRelationship', e.target.value.replace(/[^A-Za-z .'-]/g, ''))} /></label>
+            <label>Guarantor PAN<input maxLength={10} value={applicant.additionalDetails?.guarantorPan || ''} onChange={e => setApplicantExtra('guarantorPan', e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))} />{applicant.additionalDetails?.guarantorPan && !validPan(applicant.additionalDetails.guarantorPan) && <small className="field-error">PAN should look like ABCDE1234F.</small>}</label>
+            <label>Guarantor Mobile<input inputMode="numeric" maxLength={10} value={applicant.additionalDetails?.guarantorMobile || ''} onChange={e => setApplicantExtra('guarantorMobile', e.target.value.replace(/\D/g,'').slice(0,10))} /></label>
+            <label>Guarantor Email<input type="email" value={applicant.additionalDetails?.guarantorEmail || ''} onChange={e => setApplicantExtra('guarantorEmail', e.target.value)} onBlur={() => setValidationMessage(applicant.additionalDetails?.guarantorEmail && !validEmail(applicant.additionalDetails.guarantorEmail) ? 'Enter a valid guarantor email address.' : '')} />{applicant.additionalDetails?.guarantorEmail && !validEmail(applicant.additionalDetails.guarantorEmail) && <small className="field-error">Enter a valid guarantor email address.</small>}</label>
+            <label className="full-width">Guarantor Address<input value={applicant.additionalDetails?.guarantorAddress || ''} onChange={e => setApplicantExtra('guarantorAddress', e.target.value)} /></label>
+            <label>Guarantor KYC/Bureau Consent<select value={applicant.additionalDetails?.guarantorConsent || 'false'} onChange={e => setApplicantExtra('guarantorConsent', e.target.value)}><option value="false">Not provided</option><option value="true">Consented</option></select></label><label>Guarantor KYC Status<input readOnly value={applicant.additionalDetails?.guarantorKycStatus || 'Not started'} /></label>
             <label>Guarantor Date of Birth<input type="date" max={new Date().toISOString().slice(0,10)} value={applicant.additionalDetails?.guarantorDob || ''} onChange={e => setApplicantExtra('guarantorDob', e.target.value)} /></label>
             <label>Guarantor Age<input readOnly value={calculateAge(applicant.additionalDetails?.guarantorDob || '')} /></label>
             <label>Guarantor Gender<select value={applicant.additionalDetails?.guarantorGender || ''} onChange={e => setApplicantExtra('guarantorGender', e.target.value)}><option value="">Select</option><option>Female</option><option>Male</option><option>Other</option></select></label>
@@ -1289,7 +1384,7 @@ function App() {
             <label>Guarantor Bank Account<input value={applicant.additionalDetails?.guarantorAccountNumber || ''} onChange={e => setApplicantExtra('guarantorAccountNumber', e.target.value.replace(/\D/g,''))} /></label>
             <label>Guarantor IFSC<span className="ifsc-input-wrap"><input maxLength={11} value={applicant.additionalDetails?.guarantorIfsc || ''} onChange={e => setApplicantExtra('guarantorIfsc', e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))} /><button type="button" className="secondary ifsc-finder" onClick={() => void lookupIfsc('guarantor', applicant.additionalDetails?.guarantorIfsc || '', 'guarantorBank', 'guarantorBranch')}>Find IFSC</button></span>{ifscMessages.guarantor?.text && <small className={ifscMessages.guarantor.error ? 'field-error' : 'field-success'}>{ifscMessages.guarantor.text}</small>}</label>
             <label>Guarantor Bank Name<input value={applicant.additionalDetails?.guarantorBank || ''} onChange={e => setApplicantExtra('guarantorBank', e.target.value)} /></label><label>Guarantor Branch<input value={applicant.additionalDetails?.guarantorBranch || ''} onChange={e => setApplicantExtra('guarantorBranch', e.target.value)} /></label><label>Guarantor Account Type<select value={applicant.additionalDetails?.guarantorAccountType || ''} onChange={e => setApplicantExtra('guarantorAccountType', e.target.value)}><option value="">Select</option><option>Savings</option><option>Current</option></select></label>
-            </div></details>
+            </div></section></div>
           </div>
         </section>
 

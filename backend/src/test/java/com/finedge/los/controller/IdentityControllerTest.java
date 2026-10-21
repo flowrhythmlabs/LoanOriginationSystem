@@ -132,4 +132,20 @@ class IdentityControllerTest {
         System.arraycopy("%PDF-".getBytes(StandardCharsets.US_ASCII), 0, bytes, 0, 5);
         return new MockMultipartFile("file", "identity.pdf", "application/pdf", bytes);
     }
+
+    @Test
+    void mockAadhaarFetchReturnsMaskedNumberForUploadAndNumberEntry() throws Exception {
+        var mockMvc = MockMvcBuilders.standaloneSetup(
+                new KycController(mock(KycService.class), new MockSignzyKycProvider())).build();
+        mockMvc.perform(multipart("/api/kyc/identity").file(pdf(8))
+                        .param("documentType", "AADHAAR").param("consent", "true"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.fields.aadhaarNumber").value("XXXXXXXX9012"));
+        mockMvc.perform(multipart("/api/kyc/identity").param("number", "234567890123")
+                        .param("documentType", "AADHAAR").param("consent", "true"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.fields.aadhaarNumber").value("XXXXXXXX0123"));
+        org.junit.jupiter.api.Assertions.assertFalse(new MockSignzyKycProvider()
+                .fetchIdentityDetails("PAN", "ABCDE1234F", null).containsKey("aadhaarNumber"));
+    }
 }

@@ -14,6 +14,34 @@ export type IdentityFields = Partial<Record<IdentityField, string>>;
 
 export const maskAadhaar = (value: string) => value ? `XXXXXXXX${value.slice(-4)}` : '';
 
+export const maskAadhaarEntry = (value: string) => value.replace(/\d(?=\d{4})/g, 'X');
+
+export function editAadhaarEntry(previous: string, entered: string): string {
+  if (/^\d*$/.test(entered)) return entered.slice(0, 12);
+  const displayed = maskAadhaarEntry(previous);
+  let start = 0;
+  while (start < displayed.length && start < entered.length && displayed[start] === entered[start]) start++;
+  let end = displayed.length;
+  let enteredEnd = entered.length;
+  while (end > start && enteredEnd > start && displayed[end - 1] === entered[enteredEnd - 1]) {
+    end--;
+    enteredEnd--;
+  }
+  return (previous.slice(0, start) + entered.slice(start, enteredEnd).replace(/\D/g, '') + previous.slice(end)).slice(0, 12);
+}
+
+export function mockIdentityFields(): IdentityFields {
+  return readIdentityFields({ fields: {
+    fullName: 'Rahul Sharma',
+    dateOfBirth: '1995-05-15',
+    gender: 'Male',
+    fatherName: 'Suresh Sharma',
+    residentialAddress: '123 Main Street, Varanasi, UP, 221006',
+    panNumber: 'ABCDE1234F',
+    aadhaarNumber: 'XXXXXXXX9012'
+  } });
+}
+
 export function validateIdentityFile(file: Pick<File, 'type' | 'name' | 'size'>): string {
   if (!ALLOWED_FILE_TYPES.includes(file.type) || !/\.(pdf|jpe?g|png)$/i.test(file.name)) {
     return 'File type is not supported. Allowed formats: PDF, JPG, PNG.';
