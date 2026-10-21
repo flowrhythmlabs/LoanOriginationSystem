@@ -1,7 +1,6 @@
 import { UnderwritingWorkspace } from './UnderwritingWorkspace';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { LoginPage } from './LoginPage';
-import { StaffLoginPage } from './StaffLoginPage';
 import { buildAuthHeaders, clearAuth, readStoredAuth, type AuthSession } from './auth';
 
 type Applicant = {
@@ -922,7 +921,7 @@ function App() {
   };
 
   if (!session) {
-    return window.location.pathname.startsWith('/staff') ? <StaffLoginPage onAuthenticated={setSession} /> : <LoginPage onAuthenticated={setSession} />;
+    return <LoginPage onAuthenticated={setSession} />;
   }
 
   return (
