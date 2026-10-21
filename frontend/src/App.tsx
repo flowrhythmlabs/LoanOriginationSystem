@@ -1,5 +1,4 @@
 import { UnderwritingWorkspace } from './UnderwritingWorkspace';
-import { demoFetch } from './mockApi';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { LoginPage } from './LoginPage';
 import { StaffLoginPage } from './StaffLoginPage';
@@ -269,7 +268,7 @@ function App() {
       authHeaders.forEach((value, key) => headers.set(key, value));
     }
 
-    const response = await demoFetch(input, { ...init, headers });
+    const response = await fetch(input, { ...init, headers });
     // Do not clear the applicant session on an individual API error. In particular, a
     // submit/validation 401/403 must be shown as an error, not look like a logout.
     return response;
@@ -315,18 +314,6 @@ function App() {
     } catch {
       setApplications([]);
     }
-  };
-
-  const handleDemoDecision = async (id: number, decision: 'APPROVED' | 'REJECTED' | 'UNDER_REVIEW') => {
-    const reason = decision === 'REJECTED' ? window.prompt('Enter demo rejection reason:', 'Demo credit-policy decision') : 'Simulated management decision';
-    if (reason === null) return;
-    try {
-      const response = await apiFetch(`/api/admin/applications/${id}/decision`, {method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:decision,reason})});
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.message || 'Decision could not be saved.');
-      await fetchApplications();
-      setValidationMessage(`Demo application ${result.losNumber || id}: ${decision.replaceAll('_',' ')}.`);
-    } catch (err) {setValidationMessage(err instanceof Error ? err.message : 'Decision failed.');}
   };
 
   const fetchDocuments = async (id: number) => {
@@ -605,6 +592,18 @@ function App() {
     try {
       const mobileError = validateMobileNumber(applicant.mobileNumber);
       if (mobileError) throw new Error(mobileError);
+      if (applicant.additionalDetails?.kycBureauConsent !== 'true') {
+        setValidationMessage('Please provide consent before submitting the application.');
+        return;
+      }
+      if (creditMode === 'MANUAL' && (!/^[0-9]{3}$/.test(manualCreditScore) || Number(manualCreditScore) < 300 || Number(manualCreditScore) > 900)) {
+        setValidationMessage('Enter a valid self-reported credit score between 300 and 900.');
+        return;
+      }
+      if (creditMode === 'ONLINE' && creditScore === null) {
+        setValidationMessage('Complete the online bureau credit check before submitting.');
+        return;
+      }
       const id = await ensureApplication();
       const saveResponse = await apiFetch(`/api/applications/${id}`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
@@ -927,10 +926,9 @@ function App() {
     } catch (error) { setIfscMessages(prev => ({ ...prev, [fieldKey]: { text: error instanceof Error ? error.message : 'IFSC lookup failed.', error: true } })); }
   };
   const scheduleAutoSave = () => { if (session?.role !== 'USER') return; if (autoSaveTimerRef.current !== null) window.clearTimeout(autoSaveTimerRef.current); autoSaveTimerRef.current = window.setTimeout(() => { void handleSaveDraft(); }, 900); };
-
   const handleLogout = () => {
     const authSession = readStoredAuth();
-    if (authSession) demoFetch('/api/auth/logout', { method: 'POST', headers: buildAuthHeaders(authSession) }).catch(() => undefined);
+    if (authSession) fetch('/api/auth/logout', { method: 'POST', headers: buildAuthHeaders(authSession) }).catch(() => undefined);
     clearAuth();
     setSession(null);
   };
@@ -1447,7 +1445,7 @@ function App() {
               <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
                 <option value="ALL">All Status</option>
                 <option value="DRAFT">Draft</option>
-                <option value="SUBMITTED">Submitted</option><option value="UNDER_REVIEW">Under review</option><option value="APPROVED">Approved</option><option value="REJECTED">Rejected</option>
+                <option value="SUBMITTED">Submitted</option>
               </select>
             </div>
             <table>
@@ -1481,7 +1479,7 @@ function App() {
                     <td>{row.status === 'DRAFT' ? 'Applicant' : 'Credit Operations'}</td>
                     <td>{row.status === 'DRAFT' ? 'Complete application' : row.status === 'DOCUMENTS_PENDING' ? 'Upload pending documents' : row.status === 'SUBMITTED' ? 'Review submission' : 'Review verification'}</td>
                     <td>{new Date(row.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</td>
-                    <td><button className="secondary" onClick={() => handleOpenApplication(row.id)}>Open</button>{['SUBMITTED','UNDER_REVIEW','APPROVED','REJECTED'].includes(row.status) && <div style={{display:'flex',gap:4,marginTop:5}}><button className="secondary" onClick={() => void handleDemoDecision(row.id,'APPROVED')}>Approve</button><button className="secondary" onClick={() => void handleDemoDecision(row.id,'REJECTED')}>Reject</button><button className="secondary" onClick={() => void handleDemoDecision(row.id,'UNDER_REVIEW')}>In review</button></div>}</td>
+                    <td><button className="secondary" onClick={() => handleOpenApplication(row.id)}>Open</button></td>
                   </tr>
                 ))}
               </tbody>
