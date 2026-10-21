@@ -1,16 +1,19 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { clearAuth, persistAuth, readStoredAuth, type AuthSession } from './auth';
 
 const initialMode = window.location.pathname.startsWith('/staff') ? 'admin' : 'user';
 const demoMode = import.meta.env.VITE_DEMO_MODE === 'true';
 
 type LoginMode = 'user' | 'admin';
+type OtpLifecycle = 'idle' | 'sending' | 'request_accepted' | 'verification_pending' | 'verified' | 'failed';
 
 type UserLoginState = {
   mobile: string;
   otp: string;
   otpSent: boolean;
   demoOtp: string;
+  otpLifecycle: OtpLifecycle;
+  otpStatus: string;
   otpError: string;
   authError: string;
 };
@@ -32,12 +35,16 @@ export function LoginPage({ onAuthenticated }: { onAuthenticated: (session: Auth
   const [mobileError, setMobileError] = useState('');
   const [otpAttemptsRemaining, setOtpAttemptsRemaining] = useState(3);
   const [resendSeconds, setResendSeconds] = useState(0);
+  const otpRequestInFlight = useRef(false);
+  const otpVerificationInFlight = useRef(false);
   useEffect(() => { if (resendSeconds <= 0) return; const timer = window.setTimeout(() => setResendSeconds(value => value - 1), 1000); return () => window.clearTimeout(timer); }, [resendSeconds]);
   const [userState, setUserState] = useState<UserLoginState>({
     mobile: '',
     otp: '',
     otpSent: false,
     demoOtp: '',
+    otpLifecycle: 'idle',
+    otpStatus: '',
     otpError: '',
     authError: ''
   });
@@ -50,24 +57,93 @@ export function LoginPage({ onAuthenticated }: { onAuthenticated: (session: Auth
   const authSummary = useMemo(() => readStoredAuth(), []);
 
   const onUserSendOtp = async () => {
+    if (otpRequestInFlight.current || isSubmitting || resendSeconds > 0) return;
     const mobile = userState.mobile;
     const invalidMobile = !/^\d{10}$/.test(mobile);
     setMobileError(invalidMobile ? (mobile ? 'Please enter a valid 10-digit mobile number.' : 'Mobile number is required.') : '');
     setTermsError(!consentAccepted);
     if (invalidMobile || !consentAccepted) return;
 
+    otpRequestInFlight.current = true;
     setIsSubmitting(true);
+    setUserState(prev => ({ ...prev, otpLifecycle: 'sending', otpError: '', authError: '' }));
     try {
       const response = await fetch('/api/auth/otp/request', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ mobileNumber: mobile, termsAccepted: String(consentAccepted), consentVersion: 'v1' })
       });
       const result = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(result.message || 'OTP could not be sent. Please try again later.');
-      setUserState((prev) => ({ ...prev, otpSent: true, demoOtp: demoMode ? (result.demoOtp || '') : '', otp: '', otpError: '', authError: '' })); setOtpAttemptsRemaining(3); setResendSeconds(30);
+      const retryAfter = Math.max(0, Number(result.retryAfterSeconds) || 0);
+      if (response.status === 429) {
+        setResendSeconds(retryAfter);
+        setUserState(prev => {
+          const hasActiveOtp = Boolean(result.requestPending || prev.otpSent);
+          return {
+            ...prev,
+            otpSent: hasActiveOtp,
+            otpLifecycle: hasActiveOtp ? 'verification_pending' : 'failed',
+            otpStatus: '',
+            otpError: 'Please wait before requesting another OTP.'
+          };
+        });
+      } else if (result.requestState === 'VERIFICATION_PENDING') {
+        setResendSeconds(retryAfter || 30);
+        setOtpAttemptsRemaining(3);
+        setUserState(prev => ({
+          ...prev,
+          otpSent: true,
+          otpLifecycle: 'verification_pending',
+          demoOtp: '',
+          otp: '',
+          otpStatus: '',
+          otpError: 'We couldn’t send the OTP right now. Please try again shortly.',
+          authError: ''
+        }));
+      } else if (!response.ok) {
+        setResendSeconds(retryAfter);
+        setUserState(prev => ({
+          ...prev,
+          otpSent: false,
+          otpLifecycle: 'failed',
+          demoOtp: '',
+          otp: '',
+          otpStatus: '',
+          otpError: 'We couldn’t send the OTP right now. Please try again shortly.',
+          authError: ''
+        }));
+      } else {
+        setOtpAttemptsRemaining(3);
+        setResendSeconds(retryAfter || 30);
+        setUserState(prev => ({
+          ...prev,
+          otpSent: true,
+          otpLifecycle: 'request_accepted',
+          demoOtp: demoMode ? (result.demoOtp || '') : '',
+          otpStatus: 'If your number is eligible, you will receive an OTP shortly.',
+          otp: '',
+          otpError: '',
+          authError: ''
+        }));
+      }
     } catch (error) {
-      setUserState((prev) => ({ ...prev, otpError: error instanceof Error ? error.message : 'OTP request failed.' }));
-    } finally { setIsSubmitting(false); }
+      setResendSeconds(30);
+      setOtpAttemptsRemaining(3);
+      setUserState(prev => ({
+        ...prev,
+        otpSent: true,
+        otpLifecycle: 'verification_pending',
+        demoOtp: '',
+        otp: '',
+        otpStatus: '',
+        otpError: error instanceof TypeError
+          ? 'Unable to connect. Please check your internet connection and try again.'
+          : 'Something went wrong. Please try again.',
+        authError: ''
+      }));
+    } finally {
+      otpRequestInFlight.current = false;
+      setIsSubmitting(false);
+    }
   };
 
   const onUserVerifyOtp = async () => {
@@ -83,20 +159,49 @@ export function LoginPage({ onAuthenticated }: { onAuthenticated: (session: Auth
       return;
     }
 
+    if (otpVerificationInFlight.current) return;
 
+    otpVerificationInFlight.current = true;
     setIsSubmitting(true);
+    setUserState(prev => ({ ...prev, otpLifecycle: 'verification_pending', authError: '' }));
     try {
       const response = await fetch('/api/auth/login/user', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ mobileNumber: mobile, otp: userState.otp })
       });
       const result = await response.json().catch(() => ({}));
-      if (!response.ok || !result.accessToken) throw new Error(result.message || 'OTP verification failed.');
+      if (!response.ok || !result.accessToken) {
+        const knownInvalidOtp = response.status === 401 && result.errorCode === 'INVALID_OTP';
+        const expiredOtp = response.status === 401 && result.errorCode === 'EXPIRED_OTP';
+        setUserState(prev => ({
+          ...prev,
+          otp: knownInvalidOtp || expiredOtp ? '' : prev.otp,
+          otpLifecycle: 'failed',
+          authError: expiredOtp
+            ? 'This OTP has expired. Please request a new one.'
+            : knownInvalidOtp
+              ? 'The OTP you entered is incorrect. Please try again.'
+              : 'Something went wrong. Please try again.'
+        }));
+        if (knownInvalidOtp || expiredOtp) setOtpAttemptsRemaining(value => Math.max(0, value - 1));
+        return;
+      }
       const session: AuthSession = { authenticated: true, role: 'USER', mobile, accessToken: result.accessToken };
+      setUserState(prev => ({ ...prev, otpLifecycle: 'verified', authError: '' }));
       persistAuth(session); onAuthenticated(session);
     } catch (error) {
-      setOtpAttemptsRemaining(value => Math.max(0, value - 1)); setUserState((prev) => ({ ...prev, otp: '', authError: `${error instanceof Error ? error.message : 'OTP verification failed.'} ${Math.max(0, otpAttemptsRemaining - 1)} attempts left.` }));
-    } finally { setIsSubmitting(false); }
+      setUserState(prev => ({
+        ...prev,
+        otp: '',
+        otpLifecycle: 'failed',
+        authError: error instanceof TypeError
+          ? 'Unable to connect. Please check your internet connection and try again.'
+          : 'Something went wrong. Please try again.'
+      }));
+    } finally {
+      otpVerificationInFlight.current = false;
+      setIsSubmitting(false);
+    }
   };
 
   useEffect(() => {
@@ -192,7 +297,7 @@ export function LoginPage({ onAuthenticated }: { onAuthenticated: (session: Auth
                     return;
                   }
                   setMobileError('');
-                  setUserState((prev) => ({ ...prev, mobile: value.slice(0, 10), otpSent: false, demoOtp: '', otp: '', authError: '', otpError: '' })); setConsentAccepted(false);
+                  setUserState((prev) => ({ ...prev, mobile: value.slice(0, 10), otpSent: false, demoOtp: '', otpLifecycle: 'idle', otpStatus: '', otp: '', authError: '', otpError: '' })); setConsentAccepted(false);
                 }}
                 onPaste={(event) => {
                   if (/\D/.test(event.clipboardData.getData('text'))) {
@@ -213,13 +318,16 @@ export function LoginPage({ onAuthenticated }: { onAuthenticated: (session: Auth
               <div className="otp-boxes" style={{display:'grid',gridTemplateColumns:'repeat(6,minmax(0,1fr))',gap:8}}>
                 {Array.from({length:6}, (_, index) => <input key={index} id={`otp-box-${index}`} type="text" inputMode="numeric" maxLength={index === 0 ? 6 : 1} disabled={!userState.otpSent || isSubmitting} autoComplete={index === 0 ? 'one-time-code' : 'off'} aria-label={`OTP digit ${index + 1}`} value={userState.otp[index] || ''} onChange={event => { const raw = event.target.value.replace(/\D/g,''); if (raw.length > 1) { setUserState(prev => ({...prev, otp: raw.slice(0,6), authError:''})); document.getElementById(`otp-box-${Math.min(raw.length,6)-1}`)?.focus(); return; } const digits = userState.otp.padEnd(6,' ').split(''); digits[index] = raw || ' '; const next = digits.join('').trimEnd().replace(/ /g,''); setUserState(prev => ({...prev, otp: next, authError:''})); if (raw && index < 5) document.getElementById(`otp-box-${index+1}`)?.focus(); }} onPaste={event => { const digits = event.clipboardData.getData('text').replace(/\D/g,'').slice(0,6); if (digits) { event.preventDefault(); setUserState(prev => ({...prev, otp:digits, authError:''})); document.getElementById(`otp-box-${Math.min(digits.length,6)-1}`)?.focus(); } }} />)}
                 </div>
-              <div className="login-otp-help"><span>{userState.otpSent ? 'OTP verifies automatically after all 6 digits are entered.' : 'Enter your mobile number and select Continue to receive an OTP.'}</span>{userState.otpSent && <button type="button" className="login-resend" onClick={onUserSendOtp} disabled={isSubmitting || resendSeconds > 0}>{resendSeconds > 0 ? `Resend in ${resendSeconds}s` : 'Resend OTP'}</button>}</div>
+              <div className="login-otp-help"><span>{userState.otpSent ? 'Enter the 6-digit OTP received by SMS; it verifies automatically when complete.' : 'Enter your mobile number and select Continue to receive an OTP by SMS.'}</span>{userState.otpSent && <button type="button" className="login-resend" onClick={onUserSendOtp} disabled={isSubmitting || resendSeconds > 0}>{resendSeconds > 0 ? `Resend in ${resendSeconds}s` : 'Resend OTP'}</button>}</div>
+              {userState.otpStatus && <div role="status">{userState.otpStatus}</div>}
             </label>}
             {userState.demoOtp && demoMode && <div className="auth-demo-box"><span>Demo OTP</span><strong>{userState.demoOtp}</strong></div>}
             <label className={`auth-field auth-consent${termsError ? ' has-error' : ''}`}><input type="checkbox" checked={consentAccepted} disabled={userState.otpSent} aria-invalid={termsError} onChange={e => { setConsentAccepted(e.target.checked); if (e.target.checked) setTermsError(false); }} /><span>I agree to the <a href="/terms.html" target="_blank" rel="noreferrer">Terms &amp; Conditions</a> and <a href="/privacy.html" target="_blank" rel="noreferrer">Privacy Policy</a>.</span></label>
             {termsError && <div id="terms-error" className="terms-error" role="alert">Please select Terms &amp; Conditions to continue.</div>}
-            <button type="button" className="primary auth-submit" onClick={userState.otpSent ? onUserVerifyOtp : onUserSendOtp} disabled={isSubmitting || (userState.otpSent && userState.otp.length !== 6)}>
-              {isSubmitting ? (userState.otpSent ? 'Verifying...' : 'Sending OTP...') : (userState.otpSent ? 'Login' : 'Continue')}
+            <button type="button" className="primary auth-submit" onClick={userState.otpSent ? onUserVerifyOtp : onUserSendOtp} disabled={isSubmitting || (userState.otpSent && userState.otp.length !== 6) || (!userState.otpSent && resendSeconds > 0)}>
+              {isSubmitting
+                ? (userState.otpLifecycle === 'sending' ? 'Sending OTP…' : 'Verifying...')
+                : (!userState.otpSent && resendSeconds > 0 ? `Please wait (${resendSeconds}s)` : (userState.otpSent ? 'Login' : 'Continue'))}
                 </button>
 
             {userState.otpError && <div className="auth-error">{userState.otpError}</div>}

@@ -151,7 +151,7 @@ Vite uses port `5173` by default and proxies `/api` requests to `http://localhos
 
 The login page calls the backend authentication endpoints. Successful login receives an opaque bearer token stored for the current browser session. Protected API requests send `Authorization: Bearer <token>`; caller-supplied `X-Role`, `X-Mobile`, and `X-Username` headers are no longer trusted. Tokens expire after the configured session lifetime and logout revokes the token on the server.
 
-**SMS OTP:** user login sends a six-digit OTP by SMS through 2Factor (`SmsOtpSender`). Set the key with `SMS_API_KEY` (or `providers.sms.api-key` in `application.yml`); optionally set `SMS_TEMPLATE_ID`. Use your own key and do not commit real keys to a public repository. `LOS_DEMO_OTP_ENABLED` defaults to `false`; set it to `true` only for local testing to have the OTP returned in the API response. The OTP expires after `LOS_OTP_MINUTES` (default 5).
+**SMS OTP:** user login requests a six-digit OTP through 2Factor (`SmsOtpSender`) using its existing `/API/V1/{key}/SMS/{mobile}/{otp}/{template}` endpoint. The configured 2Factor URL override, if used, must also target an SMS route; a 2Factor `/VOICE/` URL is rejected before any request is made. Set `SMS_API_KEY` in the backend process environment; this key is required and there is no in-code fallback. If it is missing, server logs record the safe diagnostic code `sms_api_key_missing`, while the browser receives only a generic retry message. A provider `Success` response means the request was accepted, not that the SMS was delivered. The login UI reports this distinction and keeps the OTP active when the request outcome is uncertain (for example, a timeout). Backend resend cooldown defaults to 30 seconds (`LOS_OTP_RESEND_COOLDOWN_SECONDS`); connect/read timeouts default to 3/8 seconds (`SMS_CONNECT_TIMEOUT_MS`, `SMS_READ_TIMEOUT_MS`). Set `SMS_TEMPLATE_ID` if needed. `LOS_DEMO_OTP_ENABLED` defaults to `false`; set it to `true` only for local testing to have the OTP returned in the API response. The OTP expires after `LOS_OTP_MINUTES` (default 5).
 
 **Staff login:** `/staff/login` uses the staff accounts seeded in section 6.1: password, then a TOTP code.
 
@@ -286,6 +286,8 @@ Runtime settings are in [backend/src/main/resources/application.yml](backend/src
 | `DB_PASSWORD` | `postgres` |
 | `SMS_API_KEY` | 2Factor API key for OTP SMS |
 | `SMS_TEMPLATE_ID` | Optional 2Factor template name |
+| `LOS_OTP_RESEND_COOLDOWN_SECONDS` | Backend OTP resend cooldown in seconds (default `30`) |
+| `SMS_CONNECT_TIMEOUT_MS`, `SMS_READ_TIMEOUT_MS` | 2Factor connection/read timeout in milliseconds (defaults `3000`/`8000`) |
 | `LOS_DEMO_OTP_ENABLED` | `false`; `true` returns the OTP in the API response (local testing only) |
 | `DOCUMENT_STORAGE_PATH` | `./data/documents` |
 | `LOAN_MAX_INTEREST_RATE` | `30` percent |

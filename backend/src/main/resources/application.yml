@@ -31,6 +31,7 @@ app:
   auth:
     session-minutes: ${LOS_SESSION_MINUTES:60}
     otp-minutes: ${LOS_OTP_MINUTES:5}
+    otp-resend-cooldown-seconds: ${LOS_OTP_RESEND_COOLDOWN_SECONDS:30}
     # Development-only OTP exposure. Set false in production and integrate an SMS OTP provider.
     demo-otp-enabled: ${LOS_DEMO_OTP_ENABLED:false}
   loan:
@@ -75,6 +76,8 @@ providers:
     authorization-header: ${SMS_AUTH_HEADER:X-API-Key}
     sender-id: ${SMS_SENDER_ID:}
     template-id: ${SMS_TEMPLATE_ID:}
+    connect-timeout-ms: ${SMS_CONNECT_TIMEOUT_MS:3000}
+    read-timeout-ms: ${SMS_READ_TIMEOUT_MS:8000}
   bureau:
     url: ${BUREAU_API_URL:}
     api-key: ${BUREAU_API_KEY:}
