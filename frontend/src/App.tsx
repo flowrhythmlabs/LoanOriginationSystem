@@ -2,6 +2,7 @@ import { UnderwritingWorkspace } from './UnderwritingWorkspace';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { LoginPage } from './LoginPage';
 import { buildAuthHeaders, clearAuth, readStoredAuth, type AuthSession } from './auth';
+import { ALLOWED_FILE_TYPES, MAX_FILE_SIZE, maskAadhaar, readIdentityFields, validateIdentity, validateIdentityFile, type IdentityFields, type IdentityField, type IdentityType } from './identity';
 
 type Applicant = {
   fullName: string;
@@ -175,8 +176,6 @@ const DOCUMENTS_BY_EMPLOYMENT: Record<string, Array<{ key: DocumentType; label: 
   BUSINESS_OWNER: [{key:'PAN_DOCUMENT',label:'PAN',required:true},{key:'AADHAAR_DOCUMENT',label:'Aadhaar',required:true},{key:'BANK_STATEMENT',label:'Business bank statements (3 months)',required:true},{key:'ITR',label:'ITR (last 2 years with computation)',required:true},{key:'BUSINESS_PROOF',label:'Business registration / entity documents',required:true},{key:'GST_DOCUMENT',label:'GST registration / returns',required:true},{key:'PHOTOGRAPH',label:'Passport-size photograph',required:true},{key:'SIGNATURE',label:'Signature / e-sign',required:true},{key:'CANCELLED_CHEQUE',label:'Cancelled cheque / bank proof',required:true},{key:'VOTER_ID',label:'Voter ID (alternate ID)',required:false}]
 };
 const REQUIRED_DOCUMENTS = DOCUMENTS_BY_EMPLOYMENT.SALARIED;
-const ALLOWED_FILE_TYPES = ['application/pdf', 'image/jpeg', 'image/png'];
-const MAX_FILE_SIZE = 5 * 1024 * 1024;
 const INDIA_STATES = ['Andhra Pradesh','Arunachal Pradesh','Assam','Bihar','Chhattisgarh','Goa','Gujarat','Haryana','Himachal Pradesh','Jharkhand','Karnataka','Kerala','Madhya Pradesh','Maharashtra','Manipur','Meghalaya','Mizoram','Nagaland','Odisha','Punjab','Rajasthan','Sikkim','Tamil Nadu','Telangana','Tripura','Uttar Pradesh','Uttarakhand','West Bengal','Andaman and Nicobar Islands','Chandigarh','Dadra and Nagar Haveli and Daman and Diu','Delhi','Jammu and Kashmir','Ladakh','Lakshadweep','Puducherry'];
 
 const createInitialDocuments = (): Record<DocumentType, DocumentEntry> => ({
@@ -227,6 +226,15 @@ const statusColors: Record<string, string> = {
 function App() {
   const [session, setSession] = useState<AuthSession | null>(() => readStoredAuth());
   const [applicant, setApplicant] = useState<Applicant>(initialApplicant);
+  const [identityType, setIdentityType] = useState<IdentityType>('');
+  const [identityPanNumber, setIdentityPanNumber] = useState('');
+  const [identityFile, setIdentityFile] = useState<File | null>(null);
+  const [identityConsent, setIdentityConsent] = useState(false);
+  const [identityLoading, setIdentityLoading] = useState(false);
+  const [identityError, setIdentityError] = useState('');
+  const [identityFetched, setIdentityFetched] = useState<IdentityFields>({});
+  const identityRequestRef = useRef<AbortController | null>(null);
+  const identityFileRef = useRef<HTMLInputElement | null>(null);
   const [applicantMobileError, setApplicantMobileError] = useState('');
   const [employment, setEmployment] = useState<Employment>(initialEmployment);
   const [loanDetails, setLoanDetails] = useState<LoanDetails>(initialLoanDetails);
@@ -274,6 +282,113 @@ function App() {
     // Do not clear the applicant session on an individual API error. In particular, a
     // submit/validation 401/403 must be shown as an error, not look like a logout.
     return response;
+  };
+
+  const resetIdentity = () => {
+    identityRequestRef.current?.abort();
+    identityRequestRef.current = null;
+    setIdentityType('');
+    setIdentityPanNumber('');
+    setIdentityFile(null);
+    setIdentityConsent(false);
+    setIdentityLoading(false);
+    setIdentityError('');
+    setIdentityFetched({});
+    if (identityFileRef.current) identityFileRef.current.value = '';
+  };
+  useEffect(() => () => identityRequestRef.current?.abort(), []);
+
+  const identityValue = (key: IdentityField) =>
+    key in initialApplicant
+      ? String(applicant[key as keyof Applicant] || '')
+      : applicant.additionalDetails?.[key] || '';
+  const isIdentityFetched = (key: IdentityField) => Boolean(identityFetched[key] && identityFetched[key] === identityValue(key));
+  const identityTag = (key: IdentityField) => isIdentityFetched(key)
+    ? <small className="field-success identity-source-tag">Fetched from Aadhaar / PAN</small> : null;
+  const identityFilledCount = (Object.keys(identityFetched) as IdentityField[]).filter(isIdentityFetched).length;
+
+  const chooseIdentityFile = (files: FileList | null) => {
+    setIdentityConsent(false);
+    setIdentityError('');
+    setIdentityFile(null);
+    if (!files?.length) return;
+    if (files.length !== 1) {
+      setIdentityError('Please select one Aadhaar or PAN document.');
+      return;
+    }
+    const error = validateIdentityFile(files[0]);
+    if (error) setIdentityError(error);
+    else setIdentityFile(files[0]);
+    if (identityFileRef.current) identityFileRef.current.value = '';
+  };
+
+  const fetchIdentity = async () => {
+    if (identityRequestRef.current) return;
+    const number = identityType === 'PAN' ? identityPanNumber : applicant.additionalDetails?.aadhaarNumber || '';
+    const error = validateIdentity(identityType, number, identityFile, identityConsent);
+    setIdentityError(error);
+    if (error) return;
+    const controller = new AbortController();
+    identityRequestRef.current = controller;
+    setIdentityLoading(true);
+    const applicantAtFetch = applicant;
+    let timedOut = false;
+    const timeout = window.setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, 30000);
+    try {
+      const body = new FormData();
+      body.append('documentType', identityType);
+      body.append('consent', 'true');
+      if (identityFile) body.append('file', identityFile);
+      else body.append('number', number);
+      const response = await apiFetch('/api/kyc/identity', { method: 'POST', body, signal: controller.signal });
+      if (controller.signal.aborted) return;
+      if (!response.ok) {
+        setIdentityError(response.status === 401
+          ? 'Your session expired. Please sign in again. Your entered details have not been cleared.'
+          : response.status === 503
+            ? 'Aadhaar/PAN identity fetching is currently unavailable. Please enter your details manually. Your entered details have not been cleared.'
+            : 'Identity details could not be fetched. Please try again later or enter your details manually. Your entered details have not been cleared.');
+        return;
+      }
+      const payload: unknown = await response.json();
+      const fields = readIdentityFields(payload);
+      if (controller.signal.aborted) return;
+      setApplicant(previous => {
+        const next = { ...previous, additionalDetails: { ...previous.additionalDetails } };
+        for (const [key, value] of Object.entries(fields)) {
+          if (key in initialApplicant && key !== 'additionalDetails') {
+            // Do not overwrite manual edits made while extraction was in flight.
+            if (Reflect.get(previous, key) === Reflect.get(applicantAtFetch, key)) {
+              Object.assign(next, { [key]: value });
+            }
+          } else if (previous.additionalDetails?.[key] === applicantAtFetch.additionalDetails?.[key]) {
+            next.additionalDetails[key] = value;
+          }
+        }
+        if (fields.permanentAddress && next.additionalDetails.permanentAddress === fields.permanentAddress
+          && fields.permanentAddress !== next.residentialAddress
+          && previous.additionalDetails?.sameAsCurrentAddress === applicantAtFetch.additionalDetails?.sameAsCurrentAddress) {
+          next.additionalDetails.sameAsCurrentAddress = 'false';
+        }
+        return next;
+      });
+      setIdentityFetched(previous => ({ ...previous, ...fields }));
+    } catch {
+      if (timedOut && identityRequestRef.current === controller) {
+        setIdentityError('Identity fetching took too long. Please retry or enter your details manually. Your entered details have not been cleared.');
+      } else if (!controller.signal.aborted) {
+        setIdentityError('Identity details could not be fetched. Please try again later or enter your details manually. Your entered details have not been cleared.');
+      }
+    } finally {
+      window.clearTimeout(timeout);
+      if (identityRequestRef.current === controller) {
+        identityRequestRef.current = null;
+        setIdentityLoading(false);
+      }
+    }
   };
 
   useEffect(() => {
@@ -353,7 +468,11 @@ function App() {
   };
   const optionalNumber = (value: string | number | null | undefined) => value === '' || value === null || value === undefined || !Number.isFinite(Number(value)) ? null : Number(value);
   const buildApplicationPayload = () => ({
-    applicant: { ...applicant, dateOfBirth: applicant.dateOfBirth || null },
+    applicant: {
+      ...applicant,
+      dateOfBirth: applicant.dateOfBirth || null,
+      additionalDetails: { ...applicant.additionalDetails, identityFetchedFields: JSON.stringify(identityFetched) }
+    },
     employment: {
       ...employment,
       totalWorkExperienceYears: optionalNumber(employment.totalWorkExperienceYears),
@@ -426,6 +545,7 @@ function App() {
   };
 
   const handleOpenApplication = async (id: number) => {
+    resetIdentity();
     try {
       const response = await apiFetch(`/api/applications/${id}`);
       const app = await response.json().catch(() => null);
@@ -450,6 +570,14 @@ function App() {
         pincode: app.applicant.pincode || '',
         additionalDetails: { ...initialApplicant.additionalDetails, ...(app.applicant.additionalDetails || {}) }
       });
+      const savedIdentityFields = app.applicant.additionalDetails?.identityFetchedFields;
+      if (savedIdentityFields && savedIdentityFields !== '{}') {
+        try {
+          setIdentityFetched(readIdentityFields({ fields: JSON.parse(savedIdentityFields) }));
+        } catch {
+          setIdentityError('Saved identity source tags could not be restored. Your applicant details are still available; please review them.');
+        }
+      }
       setApplicantMobileError(validateMobileNumber(app.applicant.mobileNumber));
       setEmployment({
         employmentType: app.employmentDetails.employmentType,
@@ -897,6 +1025,7 @@ function App() {
     }
     setShowUserDashboard(false);
     setStaffApplicationOpen(true);
+    resetIdentity();
     setApplicationId(null); setSubmittedApplication(null); setSaveIndicator(''); setStatus('DRAFT'); setCreditScore(null); setManualCreditScore(''); setCreditMode('MANUAL');
     setApplicant({ ...initialApplicant, mobileNumber: session?.mobile || initialApplicant.mobileNumber });
     setEmployment(initialEmployment); setLoanDetails({ ...initialLoanDetails, loanType: newApplicationLoanType }); setDocuments(createInitialDocuments());
@@ -921,6 +1050,7 @@ function App() {
   };
   const scheduleAutoSave = () => { if (session?.role !== 'USER') return; if (autoSaveTimerRef.current !== null) window.clearTimeout(autoSaveTimerRef.current); autoSaveTimerRef.current = window.setTimeout(() => { void handleSaveDraft(true); }, 900); };
   const handleLogout = () => {
+    resetIdentity();
     const authSession = readStoredAuth();
     if (authSession) fetch('/api/auth/logout', { method: 'POST', headers: buildAuthHeaders(authSession) }).catch(() => undefined);
     clearAuth();
@@ -991,10 +1121,47 @@ function App() {
 
         <section className="card form-card" style={{display: (session.role === 'ADMIN' ? staffApplicationOpen : !showUserDashboard) && currentStep === 1 ? undefined : 'none'}} onBlurCapture={scheduleAutoSave}>
           <h2>Applicant Details</h2>
+          <fieldset className="identity-block" aria-busy={identityLoading}>
+            <legend>Identity</legend>
+            <p>Fetch applicant details from Aadhaar or PAN, then review the fields below. You can also enter details manually.</p>
+            <div className="field-grid">
+              <label>Identity document<select aria-label="Identity document" value={identityType} disabled={identityLoading} onChange={event => {
+                setIdentityType(event.target.value as IdentityType);
+                setIdentityConsent(false);
+                setIdentityFile(null);
+                setIdentityError('');
+                if (identityFileRef.current) identityFileRef.current.value = '';
+              }}><option value="">Select Aadhaar or PAN</option><option value="AADHAAR">Aadhaar</option><option value="PAN">PAN</option></select></label>
+              <p className="field-hint">Enter the selected document's number below, or upload its document.</p>
+              {identityType === 'PAN' && <label>PAN Number<input maxLength={10} disabled={identityLoading} value={identityPanNumber} onChange={event => {
+                setIdentityPanNumber(event.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''));
+                setIdentityConsent(false);
+              }} onBlur={() => setValidationMessage(identityPanNumber && !validPan(identityPanNumber) ? "PAN should look like ABCDE1234F." : "")} />{identityPanNumber && !validPan(identityPanNumber) && <small className="field-error">PAN should look like ABCDE1234F.</small>}</label>}
+              {identityType === 'AADHAAR' && <label className="required-contact-block">Aadhaar Number<input type="password" autoComplete="off" inputMode="numeric" maxLength={12} disabled={identityLoading} value={applicant.additionalDetails?.aadhaarNumber || ''} onChange={event => {
+                setApplicantExtra('aadhaarNumber', event.target.value.replace(/\D/g, '').slice(0,12));
+                if (identityType === 'AADHAAR') setIdentityConsent(false);
+              }} />{applicant.additionalDetails?.aadhaarNumber && <small className="field-hint">{maskAadhaar(applicant.additionalDetails.aadhaarNumber)}</small>}{identityTag('aadhaarNumber')}</label>}
+              <div className="full-width identity-upload" onDragOver={event => event.preventDefault()} onDrop={event => {
+                event.preventDefault();
+                if (!identityLoading) chooseIdentityFile(event.dataTransfer.files);
+              }}>
+                <label>Upload Aadhaar / PAN document<input ref={identityFileRef} type="file" accept=".pdf,.jpg,.jpeg,.png" disabled={identityLoading} onChange={event => chooseIdentityFile(event.target.files)} /></label>
+                <small className="field-hint">Accepted file types: PDF, JPG, PNG. Maximum file size: 5 MB. Drag and drop one document here.</small>
+                {identityFile && <div><span>Document selected ({(identityFile.size / 1024).toFixed(1)} KB)</span> <button type="button" className="secondary" disabled={identityLoading} onClick={() => { setIdentityFile(null); setIdentityConsent(false); setIdentityError(''); }}>Remove document</button></div>}
+              </div>
+              <label className="full-width identity-consent"><input type="checkbox" checked={identityConsent} disabled={identityLoading} onChange={event => setIdentityConsent(event.target.checked)} />I explicitly consent to using my selected Aadhaar/PAN number or document to fetch and pre-fill my identity details.</label>
+            </div>
+            <button type="button" disabled={identityLoading || !identityConsent} onClick={() => void fetchIdentity()}>{identityLoading && <span className="identity-spinner" aria-hidden="true" />}{identityLoading ? 'Fetching identity details...' : 'Fetch identity details'}</button>
+            {identityLoading && <p className="field-hint" role="status">Extracting identity details. You can continue entering applicant details below.</p>}
+            {identityError && <div className="validation-box" role="alert">{identityError}</div>}
+            {identityFilledCount > 0 && <p className="field-success" role="status">{identityFilledCount} fields filled &ndash; please review</p>}
+          </fieldset>
           <div className="field-grid">
-            <label>Full Name <span className="required-asterisk">*</span><input value={applicant.fullName} onChange={(e) => setApplicant({ ...applicant, fullName: e.target.value.replace(/[^A-Za-z .'-]/g, '') })} onBlur={(e) => { if (e.target.value && !validName(e.target.value)) setValidationMessage("Name should contain letters only."); }} />{applicant.fullName && !validName(applicant.fullName) && <small className="field-error">Name should contain letters only.</small>}</label>
-            <label>Date of Birth <span className="required-asterisk">*</span><input type="date" max={new Date().toISOString().slice(0,10)} value={applicant.dateOfBirth} onChange={(e) => setApplicant({ ...applicant, dateOfBirth: e.target.value })} /></label><label>Age<input readOnly value={calculateAge(applicant.dateOfBirth)} /></label>
-            <label>PAN Number <span className="required-asterisk">*</span><input maxLength={10} value={applicant.panNumber} onChange={(e) => setApplicant({ ...applicant, panNumber: e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '') })} onBlur={() => setValidationMessage(applicant.panNumber && !validPan(applicant.panNumber) ? "PAN should look like ABCDE1234F." : "")} />{applicant.panNumber && !validPan(applicant.panNumber) && <small className="field-error">PAN should look like ABCDE1234F.</small>}</label>
+            <label>Full Name <span className="required-asterisk">*</span><input value={applicant.fullName} onChange={(e) => setApplicant({ ...applicant, fullName: e.target.value.replace(/[^A-Za-z .'-]/g, '') })} onBlur={(e) => { if (e.target.value && !validName(e.target.value)) setValidationMessage("Name should contain letters only."); }} />{applicant.fullName && !validName(applicant.fullName) && <small className="field-error">Name should contain letters only.</small>}{identityTag('fullName')}</label>
+            <label>PAN Number <span className="required-asterisk">*</span><input maxLength={10} value={applicant.panNumber} onChange={event => {
+              setApplicant({ ...applicant, panNumber: event.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '') });
+            }} onBlur={() => setValidationMessage(applicant.panNumber && !validPan(applicant.panNumber) ? "PAN should look like ABCDE1234F." : "")} />{applicant.panNumber && !validPan(applicant.panNumber) && <small className="field-error">PAN should look like ABCDE1234F.</small>}{identityTag('panNumber')}</label>
+            <label>Date of Birth <span className="required-asterisk">*</span><input type="date" max={new Date().toISOString().slice(0,10)} value={applicant.dateOfBirth} onChange={(e) => setApplicant({ ...applicant, dateOfBirth: e.target.value })} />{identityTag('dateOfBirth')}</label><label>Age<input readOnly value={calculateAge(applicant.dateOfBirth)} />{identityTag('dateOfBirth')}</label>
             <label>Mobile Number <span className="required-asterisk">*</span><input
               type="tel"
               inputMode="numeric"
@@ -1016,32 +1183,31 @@ function App() {
                   setApplicantMobileError('Mobile number must contain digits only.');
                 }
               }}
-            />{applicantMobileError && <span role="alert" style={{ color: '#a61d1d', fontSize: 12 }}>{applicantMobileError}</span>}</label>
-            <label>Email ID <span className="required-asterisk">*</span><input type="email" value={applicant.email} onChange={(e) => setApplicant({ ...applicant, email: e.target.value })} onBlur={() => setValidationMessage(applicant.email && !validEmail(applicant.email) ? "Enter a valid email address." : "")} />{applicant.email && !validEmail(applicant.email) && <small className="field-error">Enter a valid email address.</small>}</label>
-            <label>Work Email ID <span className="required-asterisk">*</span><input type="email" value={applicant.workEmail} onChange={(e) => setApplicant({ ...applicant, workEmail: e.target.value })} onBlur={() => setValidationMessage(applicant.workEmail && !validEmail(applicant.workEmail) ? "Enter a valid work email address." : "")} />{applicant.workEmail && !validEmail(applicant.workEmail) && <small className="field-error">Enter a valid work email address.</small>}</label>
+            />{applicantMobileError && <span role="alert" style={{ color: '#a61d1d', fontSize: 12 }}>{applicantMobileError}</span>}{identityTag('mobileNumber')}</label>
+            <label>Email ID <span className="required-asterisk">*</span><input type="email" value={applicant.email} onChange={(e) => setApplicant({ ...applicant, email: e.target.value })} onBlur={() => setValidationMessage(applicant.email && !validEmail(applicant.email) ? "Enter a valid email address." : "")} />{applicant.email && !validEmail(applicant.email) && <small className="field-error">Enter a valid email address.</small>}{identityTag('email')}</label>
+            <label>Work Email ID <span className="required-asterisk">*</span><input type="email" value={applicant.workEmail} onChange={(e) => setApplicant({ ...applicant, workEmail: e.target.value })} onBlur={() => setValidationMessage(applicant.workEmail && !validEmail(applicant.workEmail) ? "Enter a valid work email address." : "")} />{applicant.workEmail && !validEmail(applicant.workEmail) && <small className="field-error">Enter a valid work email address.</small>}{identityTag('workEmail')}</label>
             <details className="full-width required-contact-block"><summary>Contact details</summary><div className="field-grid">
-            <label className="full-width">Residential Address<input value={applicant.residentialAddress} onChange={(e) => setApplicant({ ...applicant, residentialAddress: e.target.value })} /></label>
-            <label>City<input value={applicant.city} onChange={(e) => setApplicant({ ...applicant, city: e.target.value })} /></label>
-            <label>State<select value={applicant.state} onChange={(e) => setApplicant({ ...applicant, state: e.target.value })}><option value="">Select state</option>{INDIA_STATES.map(state => <option key={state} value={state}>{state}</option>)}</select></label>
-            <label>Pincode <span className="required-asterisk">*</span><input inputMode="numeric" maxLength={6} value={applicant.pincode} onChange={(e) => setApplicant({ ...applicant, pincode: e.target.value.replace(/\D/g, '').slice(0,6) })} onBlur={() => setValidationMessage(applicant.pincode && !/^[1-9][0-9]{5}$/.test(applicant.pincode) ? "PIN code must be a valid 6-digit Indian PIN code." : "")} />{applicant.pincode && !/^[1-9][0-9]{5}$/.test(applicant.pincode) && <small className="field-error">Enter a valid 6-digit PIN code.</small>}</label>
+            <label className="full-width">Residential Address<input value={applicant.residentialAddress} onChange={(e) => setApplicant({ ...applicant, residentialAddress: e.target.value })} />{identityTag('residentialAddress')}</label>
+            <label>City<input value={applicant.city} onChange={(e) => setApplicant({ ...applicant, city: e.target.value })} />{identityTag('city')}</label>
+            <label>State<select value={applicant.state} onChange={(e) => setApplicant({ ...applicant, state: e.target.value })}><option value="">Select state</option>{INDIA_STATES.map(state => <option key={state} value={state}>{state}</option>)}</select>{identityTag('state')}</label>
+            <label>Pincode <span className="required-asterisk">*</span><input inputMode="numeric" maxLength={6} value={applicant.pincode} onChange={(e) => setApplicant({ ...applicant, pincode: e.target.value.replace(/\D/g, '').slice(0,6) })} onBlur={() => setValidationMessage(applicant.pincode && !/^[1-9][0-9]{5}$/.test(applicant.pincode) ? "PIN code must be a valid 6-digit Indian PIN code." : "")} />{applicant.pincode && !/^[1-9][0-9]{5}$/.test(applicant.pincode) && <small className="field-error">Enter a valid 6-digit PIN code.</small>}{identityTag('pincode')}</label>
             </div></details>
             <details className="full-width required-contact-block"><summary>Additional personal, identity, bank, co-applicant and guarantor details</summary><div className="field-grid">
-            <label>Gender<select value={applicant.additionalDetails?.gender || ''} onChange={e => setApplicantExtra('gender', e.target.value)}><option value="">Select</option><option>Female</option><option>Male</option><option>Other</option></select></label>
-            <label>Father's Name<input value={applicant.additionalDetails?.fatherName || ''} onChange={e => setApplicantExtra('fatherName', e.target.value.replace(/[^A-Za-z .'-]/g,''))} /></label>
-            <label>Mother's Name<input value={applicant.additionalDetails?.motherName || ''} onChange={e => setApplicantExtra('motherName', e.target.value.replace(/[^A-Za-z .'-]/g,''))} /></label>
-            <label>Marital Status<select value={applicant.additionalDetails?.maritalStatus || ''} onChange={e => setApplicantExtra('maritalStatus', e.target.value)}><option>Single</option><option>Married</option><option>Widowed</option><option>Divorced</option></select></label>
-            {applicant.additionalDetails?.maritalStatus === 'Married' && <label>Spouse Name<input value={applicant.additionalDetails?.spouseName || ''} onChange={e => setApplicantExtra('spouseName', e.target.value.replace(/[^A-Za-z .'-]/g, ''))} /></label>}
-            <label>Nationality<input value={applicant.additionalDetails?.nationality || ''} onChange={e => setApplicantExtra('nationality', e.target.value.replace(/[^A-Za-z .'-]/g, ''))} /></label>
-            <label>Residential Status<select value={applicant.additionalDetails?.residentialStatus || ''} onChange={e => setApplicantExtra('residentialStatus', e.target.value)}><option value="Resident">Resident</option><option value="NRI">NRI</option><option value="Other">Other</option></select></label>
-            <label>Highest Education Qualification<input value={applicant.additionalDetails?.education || ''} onChange={e => setApplicantExtra('education', e.target.value)} /></label>
-            <label>Aadhaar Number<input inputMode="numeric" maxLength={12} value={applicant.additionalDetails?.aadhaarNumber || ''} onChange={e => setApplicantExtra('aadhaarNumber', e.target.value.replace(/\D/g,'').slice(0,12))} /></label>
+            <label>Gender<select value={applicant.additionalDetails?.gender || ''} onChange={e => setApplicantExtra('gender', e.target.value)}><option value="">Select</option><option>Female</option><option>Male</option><option>Other</option></select>{identityTag('gender')}</label>
+            <label>Father's Name<input value={applicant.additionalDetails?.fatherName || ''} onChange={e => setApplicantExtra('fatherName', e.target.value.replace(/[^A-Za-z .'-]/g,''))} />{identityTag('fatherName')}</label>
+            <label>Mother's Name<input value={applicant.additionalDetails?.motherName || ''} onChange={e => setApplicantExtra('motherName', e.target.value.replace(/[^A-Za-z .'-]/g,''))} />{identityTag('motherName')}</label>
+            <label>Marital Status<select value={applicant.additionalDetails?.maritalStatus || ''} onChange={e => setApplicantExtra('maritalStatus', e.target.value)}><option>Single</option><option>Married</option><option>Widowed</option><option>Divorced</option></select>{identityTag('maritalStatus')}</label>
+            {applicant.additionalDetails?.maritalStatus === 'Married' && <label>Spouse Name<input value={applicant.additionalDetails?.spouseName || ''} onChange={e => setApplicantExtra('spouseName', e.target.value.replace(/[^A-Za-z .'-]/g, ''))} />{identityTag('spouseName')}</label>}
+            <label>Nationality<input value={applicant.additionalDetails?.nationality || ''} onChange={e => setApplicantExtra('nationality', e.target.value.replace(/[^A-Za-z .'-]/g, ''))} />{identityTag('nationality')}</label>
+            <label>Residential Status<select value={applicant.additionalDetails?.residentialStatus || ''} onChange={e => setApplicantExtra('residentialStatus', e.target.value)}><option value="Resident">Resident</option><option value="NRI">NRI</option><option value="Other">Other</option></select>{identityTag('residentialStatus')}</label>
+            <label>Highest Education Qualification<input value={applicant.additionalDetails?.education || ''} onChange={e => setApplicantExtra('education', e.target.value)} />{identityTag('education')}</label>
             <label>Alternate ID Type<select value={applicant.additionalDetails?.alternateIdType || ''} onChange={e => setApplicantExtra('alternateIdType', e.target.value)}><option value="">Select</option><option>Voter ID</option><option>Driving Licence</option><option>Passport</option></select></label>
             <label>Alternate ID Number<input value={applicant.additionalDetails?.alternateIdNumber || ''} onChange={e => setApplicantExtra('alternateIdNumber', e.target.value)} /></label>
-            <label>Alternate Mobile<input inputMode="numeric" maxLength={10} value={applicant.additionalDetails?.alternateMobile || ''} onChange={e => setApplicantExtra('alternateMobile', e.target.value.replace(/\D/g,'').slice(0,10))} /></label>
+            <label>Alternate Mobile<input inputMode="numeric" maxLength={10} value={applicant.additionalDetails?.alternateMobile || ''} onChange={e => setApplicantExtra('alternateMobile', e.target.value.replace(/\D/g,'').slice(0,10))} />{identityTag('alternateMobile')}</label>
             <label>Residence Type<select value={applicant.additionalDetails?.currentResidenceType || ''} onChange={e => setApplicantExtra('currentResidenceType', e.target.value)}><option value="">Select</option><option>Owned</option><option>Rented</option></select></label>
             <label>Years at Current Address<input type="number" min="0" value={applicant.additionalDetails?.yearsAtAddress || ''} onChange={e => setApplicantExtra('yearsAtAddress', e.target.value)} /></label>
             {applicant.additionalDetails?.currentResidenceType === 'Rented' && <label>Monthly Rent<input type="number" min="0" value={applicant.additionalDetails?.monthlyRent || ''} onChange={e => setApplicantExtra('monthlyRent', e.target.value)} /></label>}
-            <label className="full-width"><span>Permanent Address <span className="required-asterisk">*</span></span><input readOnly={applicant.additionalDetails?.sameAsCurrentAddress === 'true'} value={applicant.additionalDetails?.sameAsCurrentAddress === 'true' ? applicant.residentialAddress : (applicant.additionalDetails?.permanentAddress || '')} maxLength={250} onChange={e => setApplicantExtra('permanentAddress', e.target.value)} /><small className="field-hint">{(applicant.additionalDetails?.permanentAddress || '').length}/250 characters</small></label>
+            <label className="full-width"><span>Permanent Address <span className="required-asterisk">*</span></span><input readOnly={applicant.additionalDetails?.sameAsCurrentAddress === 'true'} value={applicant.additionalDetails?.sameAsCurrentAddress === 'true' ? applicant.residentialAddress : (applicant.additionalDetails?.permanentAddress || '')} maxLength={250} onChange={e => setApplicantExtra('permanentAddress', e.target.value)} /><small className="field-hint">{(applicant.additionalDetails?.permanentAddress || '').length}/250 characters</small>{applicant.additionalDetails?.sameAsCurrentAddress === 'true' ? identityTag('residentialAddress') : identityTag('permanentAddress')}</label>
             <label className="full-width"><input type="checkbox" checked={applicant.additionalDetails?.sameAsCurrentAddress === 'true'} onChange={e => { setApplicantExtra('sameAsCurrentAddress', String(e.target.checked)); if (e.target.checked) setApplicantExtra('permanentAddress', applicant.residentialAddress); }} /> Permanent address is same as current address</label>
             <label>Address Proof Type<input value={applicant.additionalDetails?.addressProofType || ''} onChange={e => setApplicantExtra('addressProofType', e.target.value)} /></label>
             <label>Account Holder Name<input value={applicant.additionalDetails?.accountHolderName || ''} onChange={e => setApplicantExtra('accountHolderName', e.target.value.replace(/[^A-Za-z .'-]/g, ''))} /></label>
@@ -1419,7 +1585,7 @@ function App() {
           </div>
         </section>
 
-        {(session.role === 'ADMIN' ? staffApplicationOpen : !showUserDashboard) && currentStep === 5 && <section className="card form-card"><h2>Review & Submit</h2><p>Review your details before final submission. You can go back to correct any information.</p><div className="field-grid"><div><strong>Applicant</strong><p>{applicant.fullName}</p></div><div><strong>PAN</strong><p>{applicant.panNumber}</p></div><div><strong>Loan type</strong><p>{loanDetails.loanType.replaceAll('_',' ')}</p></div><div><strong>Requested amount</strong><p>{formatCurrency(loanDetails.requestedLoanAmount)}</p></div><div><strong>Tenure</strong><p>{loanDetails.preferredTenure} months</p></div><div><strong>EMI</strong><p>{emiSummary ? formatCurrency(Math.round(emiSummary.monthlyEmi)) : '—'}</p></div><div><strong>Missing required fields</strong><p>{missingFieldCount}</p></div><div><strong>Required documents missing</strong><p>{requiredDocumentsNotUploaded.length}</p></div></div><label className="review-declaration"><input type="checkbox" onChange={e => setLoanExtra('declarationAccepted', String(e.target.checked))} checked={loanDetails.additionalDetails?.declarationAccepted === 'true'} /> I declare that the information provided is accurate and consent to the applicable verification checks.</label><div className="inline-actions"><button className="secondary" onClick={() => setCurrentStep(1)}>Edit Applicant</button><button className="secondary" onClick={() => setCurrentStep(2)}>Edit Loan</button><button className="primary" onClick={handleSubmit}>Confirm & Submit</button></div></section>}
+        {(session.role === 'ADMIN' ? staffApplicationOpen : !showUserDashboard) && currentStep === 5 && <section className="card form-card"><h2>Review & Submit</h2><p>Review your details before final submission. You can go back to correct any information.</p><div className="field-grid"><div><strong>Applicant</strong><p>{applicant.fullName}</p>{identityTag('fullName')}</div><div><strong>PAN</strong><p>{applicant.panNumber}</p>{identityTag('panNumber')}</div><div><strong>Loan type</strong><p>{loanDetails.loanType.replaceAll('_',' ')}</p></div><div><strong>Requested amount</strong><p>{formatCurrency(loanDetails.requestedLoanAmount)}</p></div><div><strong>Tenure</strong><p>{loanDetails.preferredTenure} months</p></div><div><strong>EMI</strong><p>{emiSummary ? formatCurrency(Math.round(emiSummary.monthlyEmi)) : '—'}</p></div><div><strong>Missing required fields</strong><p>{missingFieldCount}</p></div><div><strong>Required documents missing</strong><p>{requiredDocumentsNotUploaded.length}</p></div></div><label className="review-declaration"><input type="checkbox" onChange={e => setLoanExtra('declarationAccepted', String(e.target.checked))} checked={loanDetails.additionalDetails?.declarationAccepted === 'true'} /> I declare that the information provided is accurate and consent to the applicable verification checks.</label><div className="inline-actions"><button className="secondary" onClick={() => setCurrentStep(1)}>Edit Applicant</button><button className="secondary" onClick={() => setCurrentStep(2)}>Edit Loan</button><button className="primary" onClick={handleSubmit}>Confirm & Submit</button></div></section>}
         {(session.role === 'ADMIN' ? staffApplicationOpen : !showUserDashboard) && submittedApplication && (
           <section className="card success-card">
             <h2>Application Submitted Successfully</h2>

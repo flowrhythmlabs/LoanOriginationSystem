@@ -7,6 +7,15 @@
 }
 
 * { box-sizing: border-box; }
+.identity-block { margin: 0 0 24px; padding: 18px; border: 1px solid #dfe9f9; border-radius: 12px; min-width: 0; }
+.identity-block legend { font-weight: 700; }
+.identity-upload { padding: 16px; border: 2px dashed #94a9cd; border-radius: 10px; }
+.identity-consent { display: flex; flex-direction: row; align-items: flex-start; gap: 8px; margin: 12px 0; }
+.identity-consent input[type=checkbox] { width: 18px; min-height: 18px; flex: 0 0 18px; margin: 3px 0 0; }
+.identity-source-tag { display: inline-block; padding: 3px 8px; border-radius: 6px; background: #eafbf0; }
+.identity-spinner { display: inline-block; width: 14px; height: 14px; margin-right: 8px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; vertical-align: middle; animation: identity-spin 0.8s linear infinite; }
+@keyframes identity-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .identity-spinner { animation: none; } }
 html, body, #root { margin: 0; min-height: 100%; }
 body { background: linear-gradient(180deg, #edf5ff 0%, #f4f8ff 100%); }
 button, input, select { font: inherit; }
