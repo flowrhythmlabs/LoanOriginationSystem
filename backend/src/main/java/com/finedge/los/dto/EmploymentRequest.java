@@ -6,6 +6,8 @@ import jakarta.validation.constraints.NotNull;
 
 import java.math.BigDecimal;
 
+import java.util.Map;
+import java.util.HashMap;
 public class EmploymentRequest {
     @NotNull(message = "Employment type is required")
     private String employmentType;
@@ -19,6 +21,9 @@ public class EmploymentRequest {
     private BigDecimal monthlyInHandSalary;
 
     private BigDecimal monthlyGrossSalary;
+    private Map<String, String> additionalDetails = new HashMap<>();
+    public Map<String, String> getAdditionalDetails() { return additionalDetails; }
+    public void setAdditionalDetails(Map<String, String> additionalDetails) { this.additionalDetails = additionalDetails == null ? new HashMap<>() : new HashMap<>(additionalDetails); }
 
     public EmploymentRequest() {}
 

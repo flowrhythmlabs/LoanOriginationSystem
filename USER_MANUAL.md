@@ -27,13 +27,13 @@ Enter a 10-digit mobile number using digits only. Do not include the country cod
 
 ### Step 4 - Send OTP
 
-Select **Send OTP**. This demo does not send a text message; it displays the test OTP on the screen.
+Select **Send OTP**. In development mode, the backend generates a short-lived OTP and displays it on screen. This is for development only; production requires an SMS OTP provider.
 
 ### Step 5 - Enter OTP
 
-Enter `123456` and select **Verify OTP**.
+Enter the six-digit OTP returned by the development screen and select **Verify OTP**.
 
-> **DEMO / TEST ONLY:** `123456` is a fixed test code, not a real one-time password.
+> **DEVELOPMENT ONLY:** The generated OTP is exposed by the development configuration for local testing. No SMS is sent. Production must disable OTP exposure and integrate an SMS provider.
 
 ### Step 6 - Enter the Application
 
@@ -53,9 +53,9 @@ Choose an employment type: Salaried, Self Employed, or Business Owner. Enter emp
 
 ### 3. Credit Score
 
-Select **Run Mock Credit Check** to display a simulated score. It is not a real bureau result and must not be used for a financial decision.
+Select **Run Credit Check** to save the application and persist a simulated score. It is not a real bureau result and must not be used for a financial decision.
 
-> **Current limitation:** The displayed score is not saved as the backend credit-check record required for submission. A new application submitted through this screen may therefore be rejected with a credit-check-required message even when a score is visible. There is no user control in the current screen to correct this integration issue.
+> **Current limitation:** The simulated result is now stored against the application. A real credit bureau integration is still required before production use.
 
 ### 4. KYC Verification
 
@@ -63,14 +63,14 @@ For an application that has already been created, select **Start KYC Verificatio
 
 ### 5. Loan Details
 
-Select a loan type, then enter the requested amount, preferred tenure in months, annual interest rate, and purpose of the loan.
+Select a loan type, then enter the requested amount, preferred tenure in months, and purpose of the loan. The annual interest rate is read-only and comes from backend configuration.
 
 | Field | What to enter |
 | --- | --- |
 | Loan Type | Personal, Home, Car, or Education Loan |
 | Requested Loan Amount | An amount greater than zero |
 | Preferred Tenure | A positive whole number of months |
-| Interest Rate | A percentage from 0% through the configured maximum; the default maximum is 30% per year |
+| Interest Rate | Read-only; set by backend product-rate configuration. Default prototype rates are not approved lending rates. |
 | Purpose of Loan | A short explanation of the intended purpose |
 
 The EMI estimate updates when the amount, interest rate, or tenure changes. EMI means **Equated Monthly Instalment**, the estimated monthly payment. The screen also shows estimated total interest and total amount payable. These are demo calculations, not an offer or financial advice.
@@ -90,19 +90,19 @@ All four document types must be uploaded before the backend accepts a submission
 
 ### 7. Save a Draft
 
-Select **Save Draft** to store the current applicant, employment, and loan details. Uploaded documents are stored when each upload succeeds. The data remains in the local application database after a browser refresh or backend restart.
+Select **Save Draft** to store the current applicant, employment, and loan details. Uploaded documents are stored when each upload succeeds. The data remains in the local application database after a browser refresh or backend restart. When you log in again, the latest saved draft is automatically reopened if one exists.
 
-There is no User-facing saved-application list in the current application, so a User cannot select and reopen a draft from the screen. An Admin can use **Recent Applications** and **Open** to reload a saved application. The application form itself does not automatically restore the last draft after a refresh.
+
 
 ### 8. Submit the Application
 
-Complete the fields, upload all four required document types, and select **Submit Application**. The backend also requires a persisted credit-check record. The current screen's mock score action does not create that record, so submission may fail with a credit-check-required message. If required documents are missing, the page asks you to upload them first.
+Complete the fields, upload all four required document types, and select **Submit Application**. The backend also requires a persisted credit-check record. The current screen now creates that record through the application-specific endpoint. The score remains simulated until a real bureau integration is configured. If required documents are missing, the page asks you to upload them first.
 
-If submission succeeds, the confirmation panel shows the application status and LOS Number. The current application-summary download button does not perform a download.
+If submission succeeds, the confirmation panel shows the application status and Application Number. The current application-summary download button does not perform a download.
 
-## LOS Number
+## Application Number
 
-The LOS Number is the unique reference number assigned to your submitted loan application. It is generated by the backend only after the submission requirements pass, stored with the application, and shown on the confirmation panel. The Admin Recent Applications table also displays it.
+The Application Number (stored internally as the LOS Number in this prototype) is the unique reference number assigned to your submitted loan application. It is generated by the backend only after the submission requirements pass, stored with the application, and shown on the confirmation panel. The Admin Recent Applications table also displays it.
 
 The current format is `LOS-YYYY-########`, where `YYYY` is the year and the final eight digits are a sequence; for example, `LOS-2026-00000001`. Keep the number so an Admin can find the application. Because the current credit-check integration can block submission, a number will not appear unless the backend accepts the submission.
 
@@ -117,7 +117,7 @@ The current format is `LOS-YYYY-########`, where `YYYY` is the year and the fina
 
 > **DEMO / DEVELOPMENT ONLY:** The current demo credentials are username `admin` and password `admin`. Do not use these credentials for a real service.
 
-The login screen currently checks these credentials in the browser. This is not a secure production login.
+Admin credentials are validated by the backend and a server-issued bearer token is required for protected APIs. Configure `LOS_ADMIN_USERNAME` and `LOS_ADMIN_PASSWORD` before use; the default `admin/admin` values are development-only and must not be used in production.
 
 ## Admin Dashboard and Recent Applications
 
@@ -125,7 +125,7 @@ The Admin view is part of the same page as the application form. It shows counts
 
 ## Search and Filter
 
-Type part of an applicant name or LOS Number in the search field. Search ignores letter case and matches a substring. Mobile-number search is not available in the current screen. Use the status menu to show All Status, Draft, or Submitted applications.
+Type part of an applicant name, Application Number, or mobile number in the search field. Search ignores letter case and matches a substring. Use the status menu to show All Status, Draft, or Submitted applications.
 
 Examples: searching `amit` can match an applicant named Amit Sharma; searching `LOS-2026` can match LOS numbers from that year.
 
@@ -148,16 +148,16 @@ Both User and Admin can select **Logout** in the top navigation. This clears the
 | Message or situation | What to do |
 | --- | --- |
 | Invalid mobile number | Enter 10 digits. For applicant details, use an Indian mobile number beginning with 6-9. Do not include `+91`. |
-| Invalid OTP | Enter the demo code `123456`. No SMS is sent. |
+| Invalid OTP | Request a new OTP and enter the six-digit code shown in development mode. No SMS is sent by the current prototype. |
 | Required document not uploaded | Upload each of the four listed document types and confirm each shows **Uploaded**. |
 | Application cannot be submitted | Confirm all four documents are uploaded. The backend also requires a persisted credit check; the current UI does not save its displayed mock score, so this error may persist. Contact the application maintainer. |
 | Unable to open application | Confirm the application still appears in Recent Applications and try again. If it continues, contact the application maintainer. |
-| Session expired or returned to login | Log in again. The demo login is stored in the current browser session and the UI clears it after an API authorization error. |
+| Session expired or returned to login | Log in again. The backend bearer token expires after the configured session lifetime and the UI clears it after an API authorization error. |
 | Upload failed | Choose a non-empty PDF/JPG/JPEG/PNG file up to 10 MB and retry. |
 
 ## Important Notes
 
 - This is a development/demo LOS application, not a production lending service.
-- The OTP and Admin credentials are fixed demo values.
+- Development OTPs are generated by the backend and shown in the UI only when `LOS_DEMO_OTP_ENABLED=true`; no SMS is sent. Admin credentials are backend-configured, and the defaults are development-only.
 - Mock credit and KYC results are not real verification results.
 - Production login, authorization, workflow, and provider behavior may be different. Do not enter real sensitive customer data into an unapproved demo environment.

@@ -6,6 +6,8 @@ import jakarta.validation.constraints.NotNull;
 
 import java.math.BigDecimal;
 
+import java.util.Map;
+import java.util.HashMap;
 public class LoanDetailsRequest {
     @NotBlank(message = "Loan type is required")
     private String loanType;
@@ -23,6 +25,9 @@ public class LoanDetailsRequest {
 
     @NotBlank(message = "Purpose of loan is required")
     private String purposeOfLoan;
+    private Map<String, String> additionalDetails = new HashMap<>();
+    public Map<String, String> getAdditionalDetails() { return additionalDetails; }
+    public void setAdditionalDetails(Map<String, String> additionalDetails) { this.additionalDetails = additionalDetails == null ? new HashMap<>() : new HashMap<>(additionalDetails); }
 
     public LoanDetailsRequest() {}
 

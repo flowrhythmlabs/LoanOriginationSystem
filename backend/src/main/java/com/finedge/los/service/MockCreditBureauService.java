@@ -1,52 +1,36 @@
 package com.finedge.los.service;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
-import java.util.Random;
+import java.util.Map;
 
 @Service
 public class MockCreditBureauService {
-    private final Random random = new Random();
+    private final ExternalProviderClient client;
 
-    @Value("${app.mock.credit.profile:GOOD}")
-    private String profile;
-
+    @Value("${providers.bureau.url:}") private String url;
+    @Value("${providers.bureau.api-key:}") private String key;
+    @Value("${providers.bureau.authorization-header:X-API-Key}") private String header;
+    @Value("${providers.bureau.score-json-pointer:/creditScore}") private String pointer;
+    @Value("${providers.bureau.name:CONFIGURED_BUREAU}") private String name;
+    public MockCreditBureauService(ExternalProviderClient client) { this.client = client; }
     public CreditScoreResponse evaluate(String pan) {
-        int baseScore = switch (profile.toUpperCase()) {
-            case "EXCELLENT" -> 830;
-            case "GOOD" -> 760;
-            case "AVERAGE" -> 600;
-            case "POOR" -> 420;
-            default -> 680;
-        };
+        JsonNode result = client.post(url, header, key, Map.of("pan", pan));
+        JsonNode scoreNode = result.at(pointer);
+        if (!scoreNode.isIntegralNumber()) throw new IllegalStateException("Bureau response does not contain a numeric credit score at configured JSON pointer");
 
-        int variation = random.nextInt(51) - 25;
-        int score = Math.max(300, Math.min(900, baseScore + variation));
+        int score = scoreNode.asInt();
+        if (score < 300 || score > 900) throw new IllegalStateException("Invalid credit score returned by provider");
 
-        return new CreditScoreResponse(pan, score, "MOCK-BUREAU", "SUCCESS");
+        return new CreditScoreResponse(pan, score, name, "SUCCESS");
     }
 
-    public static class CreditScoreResponse {
-        private String pan;
-        private int creditScore;
-        private String bureau;
-        private String status;
 
-        public CreditScoreResponse(String pan, int creditScore, String bureau, String status) {
-            this.pan = pan;
-            this.creditScore = creditScore;
-            this.bureau = bureau;
-            this.status = status;
-        }
+    public record CreditScoreResponse(String pan, int creditScore, String bureau, String status) {
 
-        public String getPan() { return pan; }
-        public void setPan(String pan) { this.pan = pan; }
-        public int getCreditScore() { return creditScore; }
-        public void setCreditScore(int creditScore) { this.creditScore = creditScore; }
-        public String getBureau() { return bureau; }
-        public void setBureau(String bureau) { this.bureau = bureau; }
-        public String getStatus() { return status; }
-        public void setStatus(String status) { this.status = status; }
+        public String getPan() {return pan;} public int getCreditScore() {return creditScore;}
+        public String getBureau() {return bureau;} public String getStatus() {return status;}
     }
 }

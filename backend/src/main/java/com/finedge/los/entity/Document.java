@@ -52,6 +52,9 @@ public class Document {
     @Column
     private LocalDateTime uploadedAt;
 
+    @Column(length = 2000)
+    private String verificationRemarks;
+    private LocalDateTime verifiedAt;
     public Document() {
         this.createdAt = LocalDateTime.now();
         this.updatedAt = LocalDateTime.now();
@@ -79,14 +82,19 @@ public class Document {
         BANK_STATEMENT,
         LATEST_SALARY_SLIP,
         PREVIOUS_SALARY_SLIP,
-        PAN_DOCUMENT
+        PAN_DOCUMENT,
+        SALARY_SLIPS, EMPLOYMENT_PROOF, FORM_16, ITR, BUSINESS_PROOF, GST_DOCUMENT, QUALIFICATION_PROOF, PHOTOGRAPH, SIGNATURE, CANCELLED_CHEQUE, VOTER_ID, AADHAAR_DOCUMENT, ADDRESS_PROOF, EXISTING_LOAN_STATEMENTS, PROPERTY_DOCUMENTS, VEHICLE_DOCUMENTS, EDUCATION_DOCUMENTS, BUSINESS_FINANCIALS, COAPPLICANT_PAN, COAPPLICANT_KYC, COAPPLICANT_BANK_STATEMENT, COAPPLICANT_PHOTOGRAPH, COAPPLICANT_SIGNATURE, GUARANTOR_PAN, GUARANTOR_KYC, GUARANTOR_BANK_STATEMENT, GUARANTOR_PHOTOGRAPH, GUARANTOR_SIGNATURE
     }
 
     public enum DocumentStatus {
         NOT_UPLOADED,
         UPLOADING,
         UPLOADED,
-        UPLOAD_FAILED
+        UPLOAD_FAILED,
+        UNDER_REVIEW,
+        VERIFIED,
+        REJECTED,
+        DEFICIENCY_RAISED
     }
 
     public Long getId() { return id; }
@@ -112,5 +120,9 @@ public class Document {
     public LocalDateTime getUpdatedAt() { return updatedAt; }
     public void setUpdatedAt(LocalDateTime updatedAt) { this.updatedAt = updatedAt; }
     public LocalDateTime getUploadedAt() { return uploadedAt; }
+    public String getVerificationRemarks() { return verificationRemarks; }
+    public void setVerificationRemarks(String verificationRemarks) { this.verificationRemarks = verificationRemarks; }
+    public LocalDateTime getVerifiedAt() { return verifiedAt; }
+    public void setVerifiedAt(LocalDateTime verifiedAt) { this.verifiedAt = verifiedAt; }
     public void setUploadedAt(LocalDateTime uploadedAt) { this.uploadedAt = uploadedAt; }
 }

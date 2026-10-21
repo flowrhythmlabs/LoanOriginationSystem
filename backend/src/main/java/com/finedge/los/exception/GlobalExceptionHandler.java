@@ -4,11 +4,13 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.multipart.MultipartException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.annotation.ControllerAdvice;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.slf4j.Logger;
@@ -22,6 +24,11 @@ import java.util.Map;
 public class GlobalExceptionHandler {
     private static final Logger logger = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<ApiError> handleUnreadableRequest(HttpMessageNotReadableException ex, HttpServletRequest request) {
+        ApiError apiError = new ApiError(Instant.now(), HttpStatus.BAD_REQUEST.value(), "Request contains an invalid field format. Check date of birth, dates, numeric values and selected options.", request.getRequestURI(), null);
+        return ResponseEntity.badRequest().body(apiError);
+    }
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ApiError> handleValidationException(MethodArgumentNotValidException ex, HttpServletRequest request) {
         Map<String, String> errors = new HashMap<>();
@@ -31,7 +38,8 @@ public class GlobalExceptionHandler {
             errors.put(fieldName, errorMessage);
         });
 
-        ApiError apiError = new ApiError(Instant.now(), HttpStatus.BAD_REQUEST.value(), "Validation failed", request.getRequestURI(), errors);
+        String summary = errors.entrySet().stream().map(entry -> entry.getKey() + ": " + entry.getValue()).findFirst().orElse("Please correct the highlighted fields.");
+        ApiError apiError = new ApiError(Instant.now(), HttpStatus.BAD_REQUEST.value(), "Validation failed: " + summary, request.getRequestURI(), errors);
         return ResponseEntity.badRequest().body(apiError);
     }
 
@@ -60,7 +68,7 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiError> handleMaxUploadSize(MaxUploadSizeExceededException ex, HttpServletRequest request) {
         logger.error("Multipart upload exceeded configured limit: path={} requestSize={} contentType={} exceptionClass={} exceptionMessage={}",
             request.getRequestURI(), request.getContentLengthLong(), request.getContentType(), ex.getClass().getName(), ex.getMessage(), ex);
-        ApiError apiError = new ApiError(Instant.now(), HttpStatus.PAYLOAD_TOO_LARGE.value(), "File size exceeds the 10 MB limit.", request.getRequestURI(), null);
+        ApiError apiError = new ApiError(Instant.now(), HttpStatus.PAYLOAD_TOO_LARGE.value(), "File size exceeds the 5 MB limit.", request.getRequestURI(), null);
         return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE).body(apiError);
     }
 
@@ -87,6 +95,11 @@ public class GlobalExceptionHandler {
         logger.error("Document storage failed for request {}", request.getRequestURI(), ex);
         ApiError apiError = new ApiError(Instant.now(), HttpStatus.INTERNAL_SERVER_ERROR.value(), "Document upload failed. Please try again.", request.getRequestURI(), null);
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(apiError);
+    }
+    @ExceptionHandler(AccessDeniedException.class)
+    public ResponseEntity<ApiError> handleAccessDenied(AccessDeniedException ex, HttpServletRequest request) {
+        ApiError apiError = new ApiError(Instant.now(), HttpStatus.FORBIDDEN.value(), "You do not have permission to perform this action.", request.getRequestURI(), null);
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(apiError);
     }
 
     @ExceptionHandler(Exception.class)

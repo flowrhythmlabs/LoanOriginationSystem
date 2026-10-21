@@ -2,7 +2,6 @@ package com.finedge.los.controller;
 
 import com.finedge.los.dto.KycRequest;
 import com.finedge.los.dto.KycResponse;
-import com.finedge.los.entity.KycVerification;
 import com.finedge.los.service.KycService;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
@@ -20,10 +19,10 @@ public class KycController {
     }
 
     @PostMapping("/applications/{applicationId}/kyc")
-    public ResponseEntity<KycVerification> initiateKyc(@PathVariable Long applicationId,
+    public ResponseEntity<KycResponse> initiateKyc(@PathVariable Long applicationId,
                                                      @Valid @RequestBody KycRequest request) {
         request.setApplicationId(applicationId);
-        return ResponseEntity.ok(kycService.initiateKyc(applicationId, request.getVerificationType()));
+        return ResponseEntity.ok(KycResponse.fromEntity(kycService.initiateKyc(applicationId, request.getVerificationType())));
     }
 
     @GetMapping("/applications/{applicationId}/kyc")
@@ -32,7 +31,7 @@ public class KycController {
     }
 
     @PostMapping("/applications/{applicationId}/kyc/retry")
-    public ResponseEntity<KycVerification> retryKyc(@PathVariable Long applicationId) {
-        return ResponseEntity.ok(kycService.retryKyc(applicationId));
+    public ResponseEntity<KycResponse> retryKyc(@PathVariable Long applicationId) {
+        return ResponseEntity.ok(KycResponse.fromEntity(kycService.retryKyc(applicationId)));
     }
 }

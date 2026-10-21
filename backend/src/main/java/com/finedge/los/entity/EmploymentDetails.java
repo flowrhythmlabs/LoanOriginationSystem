@@ -1,6 +1,8 @@
 package com.finedge.los.entity;
 
 import jakarta.persistence.*;
+import java.util.HashMap;
+import java.util.Map;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import java.math.BigDecimal;
 
@@ -25,6 +27,13 @@ public class EmploymentDetails {
     @OneToOne(mappedBy = "employmentDetails")
     @JsonIgnore
     private LoanApplication loanApplication;
+    @ElementCollection(fetch = FetchType.EAGER)
+    @CollectionTable(name = "employment_additional_details", joinColumns = @JoinColumn(name = "employment_details_id"))
+    @MapKeyColumn(name = "field_key")
+    @Column(name = "field_value", length = 4000)
+    private Map<String, String> additionalDetails = new HashMap<>();
+    public Map<String, String> getAdditionalDetails() { return additionalDetails; }
+    public void setAdditionalDetails(Map<String, String> additionalDetails) { this.additionalDetails = additionalDetails == null ? new HashMap<>() : new HashMap<>(additionalDetails); }
 
     @Column(nullable = false)
     private java.time.LocalDateTime createdAt;

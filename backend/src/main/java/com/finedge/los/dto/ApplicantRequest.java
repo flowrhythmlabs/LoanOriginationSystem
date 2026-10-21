@@ -7,6 +7,9 @@ import jakarta.validation.constraints.Pattern;
 
 import java.time.LocalDate;
 
+import jakarta.validation.constraints.Pattern;
+import java.util.Map;
+import java.util.HashMap;
 public class ApplicantRequest {
     @NotBlank(message = "Full name is required")
     private String fullName;
@@ -42,6 +45,9 @@ public class ApplicantRequest {
     @NotBlank(message = "Pincode is required")
     @Pattern(regexp = "^[1-9][0-9]{5}$", message = "Invalid Indian pincode")
     private String pincode;
+    private Map<String, String> additionalDetails = new HashMap<>();
+    public Map<String, String> getAdditionalDetails() { return additionalDetails; }
+    public void setAdditionalDetails(Map<String, String> additionalDetails) { this.additionalDetails = additionalDetails == null ? new HashMap<>() : new HashMap<>(additionalDetails); }
 
     public ApplicantRequest() {}
 

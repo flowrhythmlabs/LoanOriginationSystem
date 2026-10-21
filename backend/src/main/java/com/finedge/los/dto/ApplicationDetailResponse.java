@@ -33,6 +33,7 @@ public class ApplicationDetailResponse {
         applicantData.setCity(applicant.getCity());
         applicantData.setState(applicant.getState());
         applicantData.setPincode(applicant.getPincode());
+        applicantData.setAdditionalDetails(applicant.getAdditionalDetails());
         response.applicant = applicantData;
 
         var employment = application.getEmploymentDetails();
@@ -44,6 +45,7 @@ public class ApplicationDetailResponse {
         employmentData.setCurrentEmployerExperienceYears(employment.getCurrentEmployerExperienceYears());
         employmentData.setMonthlyInHandSalary(employment.getMonthlyInHandSalary());
         employmentData.setMonthlyGrossSalary(employment.getMonthlyGrossSalary());
+        employmentData.setAdditionalDetails(employment.getAdditionalDetails());
         response.employmentDetails = employmentData;
 
         var loan = application.getLoanDetails();
@@ -53,6 +55,7 @@ public class ApplicationDetailResponse {
         loanData.setInterestRate(loan.getInterestRate());
         loanData.setPreferredTenure(loan.getPreferredTenure());
         loanData.setPurposeOfLoan(loan.getPurposeOfLoan());
+        loanData.setAdditionalDetails(loan.getAdditionalDetails());
         response.loanDetails = loanData;
 
         if (application.getCreditCheck() != null) {

@@ -1,6 +1,8 @@
 package com.finedge.los.entity;
 
 import jakarta.persistence.*;
+import java.util.HashMap;
+import java.util.Map;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import java.time.LocalDate;
 import java.util.ArrayList;
@@ -42,6 +44,16 @@ public class Applicant {
 
     @Column(nullable = false)
     private String pincode;
+
+    @ElementCollection(fetch = FetchType.EAGER)
+    @CollectionTable(name = "applicant_additional_details", joinColumns = @JoinColumn(name = "applicant_id"))
+    @MapKeyColumn(name = "field_key")
+    @Column(name = "field_value", length = 4000)
+    private Map<String, String> additionalDetails = new HashMap<>();
+	
+	    public Map<String, String> getAdditionalDetails() { return additionalDetails; }
+    public void setAdditionalDetails(Map<String, String> additionalDetails) { this.additionalDetails = additionalDetails == null ? new HashMap<>() : new HashMap<>(additionalDetails); }
+
 
     @OneToOne(mappedBy = "applicant")
     @JsonIgnore
