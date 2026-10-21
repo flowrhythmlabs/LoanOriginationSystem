@@ -23,7 +23,7 @@ The frontend is a single-page application. Its progress indicator labels five st
 ### Current integration gaps
 
 - The **Run Credit Check** action now saves the current form and calls the application-specific backend credit-check endpoint, which persists the simulated result required for submission. The result is still mock data, not a live bureau result.
-- The latest saved draft for a signed-in user is automatically reopened after login. Backend application listing is filtered to the signed-in userâ€™s mobile number.
+- The latest saved draft for a signed-in user is automatically reopened after login. Backend application listing is filtered to the signed-in user’s mobile number.
 - The KYC mode selector shown in the form is included in a frontend request, but the KYC controller does not forward that value to the provider. The effective mock mode comes from backend configuration/provider behavior.
 - The application-summary download button has no download action. There are no UI actions to approve or reject an application.
 
@@ -118,6 +118,9 @@ Vite uses port `5173` by default and proxies `/api` requests to `http://localhos
 The login page calls the backend authentication endpoints. Successful login receives an opaque bearer token stored for the current browser session. Protected API requests send `Authorization: Bearer <token>`; caller-supplied `X-Role`, `X-Mobile`, and `X-Username` headers are no longer trusted. Tokens expire after the configured session lifetime and logout revokes the token on the server.
 
 **Development OTP:** `LOS_DEMO_OTP_ENABLED` defaults to `true` for local development. The backend generates a random six-digit OTP, stores it with a short expiry and attempt limit, and returns it to the UI for development testing. This is not SMS delivery. Set `LOS_DEMO_OTP_ENABLED=false` in production; a real SMS OTP provider must be integrated before user login can be used in production.
+
+This branch does not use Netlify. There are no Netlify functions, `netlify.toml` or browser-side mock API; the frontend always calls the Spring Boot backend through the Vite `/api` proxy. Any SMS provider (for example 2Factor) must be configured on the backend through the `providers.sms.*` settings used by `SmsOtpSender`.
+
 
 **Admin credentials:** `LOS_ADMIN_USERNAME` and `LOS_ADMIN_PASSWORD` configure the backend admin login. The defaults `admin` / `admin` are for local development only and must be overridden before deployment. Use a strong secret and a secret manager in production. MFA, persistent user management, password hashing/rotation, and enterprise identity integration remain production hardening items.
 
@@ -303,7 +306,6 @@ Do not put real Signzy credentials or other secrets in source control. Store sec
 
 These are not currently implemented: real SMS delivery for OTP; real bureau/KYC integrations; functional KYC mode selection; Admin approval/rejection actions; and application-summary download. A production database migration and protected document storage would also be needed before production use.
 ## Updated change-request implementation
-
 - The applicant now lands on a dashboard after OTP login. Start a new application or resume a saved draft from there.
 - New drafts use a temporary ID (`DRAFT-<id>`). The final Application Number is assigned only after successful submission.
 - Incomplete drafts are saved on field blur and can be saved manually. The application form starts without sample applicant/employer/loan amounts; the mobile number is populated from the authenticated session.
@@ -311,5 +313,4 @@ These are not currently implemented: real SMS delivery for OTP; real bureau/KYC 
 - The updated backend schema migration makes draft-only fields nullable for H2/PostgreSQL so partially completed drafts can be saved. Back up the database before upgrading an existing deployment.
 - Documents are limited to PDF/JPG/PNG up to 5 MB. Uploads are checked on the client and server; admins can verify, reject with a reason, or raise a deficiency. Submission requires required documents to be verified.
 - The frontend build and Maven test suite could not be run in this workspace because the project dependencies are not installed and Maven is unavailable. Install dependencies locally and run `npm ci && npm run build` in `frontend`, then `mvn test` in `backend` before deployment.
-
 Live SMS, production KYC/bureau providers, selfie liveness, OCR-based document-to-applicant matching, IFSC lookup, and percentage-based upload progress still require provider/infrastructure integration.

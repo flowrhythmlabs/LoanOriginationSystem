@@ -1,0 +1,44 @@
+package com.finedge.los.dto;
+
+import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
+
+import java.math.BigDecimal;
+
+import java.util.Map;
+import java.util.HashMap;
+public class EmploymentRequest {
+    @NotNull(message = "Employment type is required")
+    private String employmentType;
+
+    private String employerName;
+    private String designation;
+    private Double totalWorkExperienceYears;
+    private Double currentEmployerExperienceYears;
+
+    @DecimalMin(value = "0.01", message = "Monthly in-hand salary must be greater than zero")
+    private BigDecimal monthlyInHandSalary;
+
+    private BigDecimal monthlyGrossSalary;
+    private Map<String, String> additionalDetails = new HashMap<>();
+    public Map<String, String> getAdditionalDetails() { return additionalDetails; }
+    public void setAdditionalDetails(Map<String, String> additionalDetails) { this.additionalDetails = additionalDetails == null ? new HashMap<>() : new HashMap<>(additionalDetails); }
+
+    public EmploymentRequest() {}
+
+    public String getEmploymentType() { return employmentType; }
+    public void setEmploymentType(String employmentType) { this.employmentType = employmentType; }
+    public String getEmployerName() { return employerName; }
+    public void setEmployerName(String employerName) { this.employerName = employerName; }
+    public String getDesignation() { return designation; }
+    public void setDesignation(String designation) { this.designation = designation; }
+    public Double getTotalWorkExperienceYears() { return totalWorkExperienceYears; }
+    public void setTotalWorkExperienceYears(Double totalWorkExperienceYears) { this.totalWorkExperienceYears = totalWorkExperienceYears; }
+    public Double getCurrentEmployerExperienceYears() { return currentEmployerExperienceYears; }
+    public void setCurrentEmployerExperienceYears(Double currentEmployerExperienceYears) { this.currentEmployerExperienceYears = currentEmployerExperienceYears; }
+    public BigDecimal getMonthlyInHandSalary() { return monthlyInHandSalary; }
+    public void setMonthlyInHandSalary(BigDecimal monthlyInHandSalary) { this.monthlyInHandSalary = monthlyInHandSalary; }
+    public BigDecimal getMonthlyGrossSalary() { return monthlyGrossSalary; }
+    public void setMonthlyGrossSalary(BigDecimal monthlyGrossSalary) { this.monthlyGrossSalary = monthlyGrossSalary; }
+}

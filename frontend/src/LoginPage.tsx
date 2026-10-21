@@ -1,8 +1,8 @@
-import { demoFetch } from './mockApi';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { clearAuth, persistAuth, readStoredAuth, type AuthSession } from './auth';
 
-const initialMode = 'user';
+const initialMode = window.location.pathname.startsWith('/staff') ? 'admin' : 'user';
+const demoMode = import.meta.env.VITE_DEMO_MODE === 'true';
 
 type LoginMode = 'user' | 'admin';
 
@@ -10,7 +10,7 @@ type UserLoginState = {
   mobile: string;
   otp: string;
   otpSent: boolean;
-  challengeToken: string;
+  demoOtp: string;
   otpError: string;
   authError: string;
 };
@@ -22,20 +22,20 @@ type AdminLoginState = {
 };
 
 export function LoginPage({ onAuthenticated }: { onAuthenticated: (session: AuthSession) => void }) {
-  const [mode, setMode] = useState<LoginMode>(initialMode);
+  const [mode] = useState<LoginMode>(initialMode);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showAdminPassword, setShowAdminPassword] = useState(false);
+  const [staffChallengeId, setStaffChallengeId] = useState('');
+  const [staffMfaCode, setStaffMfaCode] = useState('');
   const [consentAccepted, setConsentAccepted] = useState(false);
-  const [termsError, setTermsError] = useState(false);
   const [otpAttemptsRemaining, setOtpAttemptsRemaining] = useState(3);
   const [resendSeconds, setResendSeconds] = useState(0);
-  const verifyingRef = useRef(false);
   useEffect(() => { if (resendSeconds <= 0) return; const timer = window.setTimeout(() => setResendSeconds(value => value - 1), 1000); return () => window.clearTimeout(timer); }, [resendSeconds]);
   const [userState, setUserState] = useState<UserLoginState>({
     mobile: '',
     otp: '',
     otpSent: false,
-    challengeToken: '',
+    demoOtp: '',
     otpError: '',
     authError: ''
   });
@@ -49,46 +49,45 @@ export function LoginPage({ onAuthenticated }: { onAuthenticated: (session: Auth
 
   const onUserSendOtp = async () => {
     const mobile = userState.mobile;
-    if (!consentAccepted) { setTermsError(true); return; }
-    setTermsError(false);
+    if (!consentAccepted) { setUserState((prev) => ({ ...prev, otpError: 'Please accept the terms and privacy notice to continue.' })); return; }
     if (!/^\d{10}$/.test(mobile)) {
       setUserState((prev) => ({ ...prev, otpError: 'Please enter a valid 10-digit mobile number.' }));
       return;
     }
+
     setIsSubmitting(true);
     try {
-      const response = await demoFetch('/api/auth/otp/request', {
+      const response = await fetch('/api/auth/otp/request', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ mobileNumber: mobile, termsAccepted: String(consentAccepted), consentVersion: 'v1' })
       });
       const result = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        if (typeof result.retryAfter === 'number' && result.retryAfter <= 600) setResendSeconds(result.retryAfter);
-        throw new Error(result.message || 'OTP could not be sent. Please try again later.');
-      }
-      setUserState((prev) => ({ ...prev, otpSent: true, challengeToken: String(result.challengeToken || ''), otp: '', otpError: '', authError: '' })); setOtpAttemptsRemaining(3); setResendSeconds(Number(result.resendAfterSeconds) || 30);
+      if (!response.ok) throw new Error(result.message || 'OTP could not be sent. Please try again later.');
+      setUserState((prev) => ({ ...prev, otpSent: true, demoOtp: demoMode ? (result.demoOtp || '') : '', otp: '', otpError: '', authError: '' })); setOtpAttemptsRemaining(3); setResendSeconds(30);
     } catch (error) {
-      setUserState((prev) => ({ ...prev, otpError: error instanceof Error && error.name !== 'TypeError' ? error.message : 'Network error. Check your connection and try again.' }));
+      setUserState((prev) => ({ ...prev, otpError: error instanceof Error ? error.message : 'OTP request failed.' }));
     } finally { setIsSubmitting(false); }
   };
 
   const onUserVerifyOtp = async () => {
-    if (verifyingRef.current) return;
     const mobile = userState.mobile;
+
     if (!/^\d{10}$/.test(mobile)) {
       setUserState((prev) => ({ ...prev, authError: 'Please enter a valid 10-digit mobile number.' }));
       return;
     }
+
     if (!userState.otpSent || !/^\d{6}$/.test(userState.otp)) {
       setUserState((prev) => ({ ...prev, authError: 'Enter the 6-digit OTP sent to your mobile number.' }));
       return;
     }
+
+
     setIsSubmitting(true);
-    verifyingRef.current = true;
     try {
-      const response = await demoFetch('/api/auth/login/user', {
+      const response = await fetch('/api/auth/login/user', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mobileNumber: mobile, otp: userState.otp, challengeToken: userState.challengeToken })
+        body: JSON.stringify({ mobileNumber: mobile, otp: userState.otp })
       });
       const result = await response.json().catch(() => ({}));
       if (!response.ok || !result.accessToken) throw new Error(result.message || 'OTP verification failed.');
@@ -96,7 +95,7 @@ export function LoginPage({ onAuthenticated }: { onAuthenticated: (session: Auth
       persistAuth(session); onAuthenticated(session);
     } catch (error) {
       setOtpAttemptsRemaining(value => Math.max(0, value - 1)); setUserState((prev) => ({ ...prev, otp: '', authError: `${error instanceof Error ? error.message : 'OTP verification failed.'} ${Math.max(0, otpAttemptsRemaining - 1)} attempts left.` }));
-    } finally { verifyingRef.current = false; setIsSubmitting(false); }
+    } finally { setIsSubmitting(false); }
   };
 
   useEffect(() => {
@@ -106,25 +105,49 @@ export function LoginPage({ onAuthenticated }: { onAuthenticated: (session: Auth
     // OTP verification is intentionally triggered only when the six-digit value changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userState.otp, userState.otpSent]);
-
   const onAdminLogin = async () => {
     const username = adminState.username.trim();
     if (!username || !adminState.password) {
-      setAdminState((prev) => ({ ...prev, authError: 'Username and password are required.' }));
+      setAdminState(prev => ({ ...prev, authError: 'Username and password are required.' }));
       return;
     }
     setIsSubmitting(true);
     try {
-      const response = await demoFetch('/api/auth/login/admin', {
+      const response = await fetch('/api/staff/auth/password', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password: adminState.password })
       });
       const result = await response.json().catch(() => ({}));
-      if (!response.ok || !result.accessToken) throw new Error(result.message || 'Invalid username or password.');
-      const session: AuthSession = { authenticated: true, role: 'ADMIN', username, accessToken: result.accessToken };
-      persistAuth(session); onAuthenticated(session);
+      if (!response.ok || !result.challengeId) throw new Error(result.message || 'Staff sign-in failed.');
+      setStaffChallengeId(result.challengeId);
+      setStaffMfaCode('');
+      setAdminState(prev => ({ ...prev, password: '', authError: '' }));
     } catch (error) {
-      setAdminState((prev) => ({ ...prev, authError: error instanceof Error ? error.message : 'Login failed.' }));
+      setAdminState(prev => ({ ...prev, authError: error instanceof Error ? error.message : 'Staff sign-in failed.' }));
+    } finally { setIsSubmitting(false); }
+  };
+
+  const onStaffMfa = async () => {
+    if (!/^\d{6}$/.test(staffMfaCode)) {
+      setAdminState(prev => ({ ...prev, authError: 'Enter the 6-digit code from your authenticator.' }));
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const response = await fetch('/api/staff/auth/mfa', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ challengeId: staffChallengeId, code: staffMfaCode })
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || !result.accessToken) throw new Error(result.message || 'MFA verification failed.');
+      // The existing admin workspace uses ADMIN as its UI role; server permissions remain authoritative.
+      const session: AuthSession = { authenticated: true, role: 'ADMIN', username: result.username || adminState.username.trim(), accessToken: result.accessToken };
+    persistAuth(session);
+    onAuthenticated(session);
+    } catch (error) {
+      setStaffMfaCode('');
+      setAdminState(prev => ({ ...prev, authError: error instanceof Error ? error.message : 'MFA verification failed.' }));
     } finally { setIsSubmitting(false); }
   };
 
@@ -142,13 +165,19 @@ export function LoginPage({ onAuthenticated }: { onAuthenticated: (session: Auth
         <div className="design-illustration" aria-hidden="true"><img src="/login-illustration.png" alt="" /><div className="illustration-slogan">Build<br/>Your Future<br/>with Us</div></div>
       </aside>
       <div className="auth-card">
+        {demoMode && <div className="auth-demo-box" role="status">Demo environment</div>}
+
+
+
         <div className="new-login-top"><span>◎ English⌄</span></div>
+
         {mode === 'user' && (
           <div className="auth-form">
             <div className="new-login-welcome">
               <div className="user-avatar" aria-label="User avatar"><img src="/approved-user-avatar.png" alt="Welcome back" /></div>
               <div><h2>Welcome Back!</h2><p>Login to continue with your<br/>loan application.</p></div>
             </div>
+
             <label className="auth-field">
               <span>Mobile Number <em className="login-required">*</em></span>
               <input
@@ -160,7 +189,7 @@ export function LoginPage({ onAuthenticated }: { onAuthenticated: (session: Auth
                     setUserState((prev) => ({ ...prev, authError: 'Mobile number must contain digits only.', otpError: '' }));
                     return;
                   }
-                  setUserState((prev) => ({ ...prev, mobile: value.slice(0, 10), otpSent: false, challengeToken: '', otp: '', authError: '', otpError: '' })); setConsentAccepted(false);
+                  setUserState((prev) => ({ ...prev, mobile: value.slice(0, 10), otpSent: false, demoOtp: '', otp: '', authError: '', otpError: '' })); setConsentAccepted(false);
                 }}
                 onPaste={(event) => {
                   if (/\D/.test(event.clipboardData.getData('text'))) {
@@ -179,14 +208,15 @@ export function LoginPage({ onAuthenticated }: { onAuthenticated: (session: Auth
               <span>OTP <em className="login-required">*</em></span>
               <div className="otp-boxes" style={{display:'grid',gridTemplateColumns:'repeat(6,minmax(0,1fr))',gap:8}}>
                 {Array.from({length:6}, (_, index) => <input key={index} id={`otp-box-${index}`} type="text" inputMode="numeric" maxLength={index === 0 ? 6 : 1} disabled={!userState.otpSent || isSubmitting} autoComplete={index === 0 ? 'one-time-code' : 'off'} aria-label={`OTP digit ${index + 1}`} value={userState.otp[index] || ''} onChange={event => { const raw = event.target.value.replace(/\D/g,''); if (raw.length > 1) { setUserState(prev => ({...prev, otp: raw.slice(0,6), authError:''})); document.getElementById(`otp-box-${Math.min(raw.length,6)-1}`)?.focus(); return; } const digits = userState.otp.padEnd(6,' ').split(''); digits[index] = raw || ' '; const next = digits.join('').trimEnd().replace(/ /g,''); setUserState(prev => ({...prev, otp: next, authError:''})); if (raw && index < 5) document.getElementById(`otp-box-${index+1}`)?.focus(); }} onPaste={event => { const digits = event.clipboardData.getData('text').replace(/\D/g,'').slice(0,6); if (digits) { event.preventDefault(); setUserState(prev => ({...prev, otp:digits, authError:''})); document.getElementById(`otp-box-${Math.min(digits.length,6)-1}`)?.focus(); } }} />)}
-              </div>
+                </div>
               <div className="login-otp-help"><span>{userState.otpSent ? 'OTP verifies automatically after all 6 digits are entered.' : 'Enter your mobile number and select Continue to receive an OTP.'}</span>{userState.otpSent && <button type="button" className="login-resend" onClick={onUserSendOtp} disabled={isSubmitting || resendSeconds > 0}>{resendSeconds > 0 ? `Resend in ${resendSeconds}s` : 'Resend OTP'}</button>}</div>
             </label>}
-            <label className={`auth-field auth-consent${termsError ? ' has-error' : ''}`}><input type="checkbox" checked={consentAccepted} disabled={userState.otpSent} aria-invalid={termsError} aria-describedby={termsError ? 'terms-error' : undefined} onChange={e => { setConsentAccepted(e.target.checked); if (e.target.checked) setTermsError(false); }} /><span>I agree to the <a href="/terms.html" target="_blank" rel="noreferrer">Terms &amp; Conditions</a> and <a href="/privacy.html" target="_blank" rel="noreferrer">Privacy Policy</a>.</span></label>
-            {termsError && <div id="terms-error" className="terms-error" role="alert">Please select Terms &amp; Conditions to continue.</div>}
-            <button type="button" className="primary auth-submit" onClick={userState.otpSent ? onUserVerifyOtp : onUserSendOtp} disabled={isSubmitting || (userState.otpSent && userState.otp.length !== 6)}>
+            {userState.demoOtp && demoMode && <div className="auth-demo-box"><span>Demo OTP</span><strong>{userState.demoOtp}</strong></div>}
+            <label className="auth-field auth-consent"><input type="checkbox" checked={consentAccepted} disabled={userState.otpSent} onChange={e => setConsentAccepted(e.target.checked)} /><span>I agree to the <a href="/terms.html" target="_blank" rel="noreferrer">Terms &amp; Conditions</a> and <a href="/privacy.html" target="_blank" rel="noreferrer">Privacy Policy</a>.</span></label>
+            <button type="button" className="primary auth-submit" onClick={userState.otpSent ? onUserVerifyOtp : onUserSendOtp} disabled={isSubmitting || (!userState.otpSent && !consentAccepted) || (userState.otpSent && userState.otp.length !== 6)}>
               {isSubmitting ? (userState.otpSent ? 'Verifying...' : 'Sending OTP...') : (userState.otpSent ? 'Login' : 'Continue')}
-            </button>
+                </button>
+
             {userState.otpError && <div className="auth-error">{userState.otpError}</div>}
             {userState.authError && <div className="auth-error">{userState.authError}</div>}
           </div>
@@ -196,23 +226,24 @@ export function LoginPage({ onAuthenticated }: { onAuthenticated: (session: Auth
           <div className="auth-form">
             <div className="auth-form-header">
               <div>
-                <h2>Admin Login</h2>
-                <p>Manage applications and approvals.</p>
+                <h2>Staff Login</h2>
+                <p>Secure staff access with multi-factor authentication.</p>
               </div>
             </div>
 
-            <label className="auth-field">
+
+            {!staffChallengeId && <label className="auth-field">
               <span>Username</span>
               <input
                 type="text"
                 value={adminState.username}
                 onChange={(event) => setAdminState((prev) => ({ ...prev, username: event.target.value, authError: '' }))}
-                placeholder="Enter admin username"
+                placeholder="Enter staff username"
                 autoComplete="username"
               />
-            </label>
+            </label>}
 
-            <label className="auth-field">
+            {!staffChallengeId && <label className="auth-field">
               <span>Password</span>
               <div className="password-wrap">
                 <input
@@ -231,16 +262,22 @@ export function LoginPage({ onAuthenticated }: { onAuthenticated: (session: Auth
                   {showAdminPassword ? 'Hide' : 'Show'}
                 </button>
               </div>
-            </label>
+            </label>}
 
-            <button type="button" className="primary auth-submit" onClick={onAdminLogin} disabled={isSubmitting}>
-              {isSubmitting ? 'Signing in...' : 'Login'}
+            {staffChallengeId && <label className="auth-field">
+              <span>Authenticator code</span>
+              <input type="text" inputMode="numeric" autoComplete="one-time-code" maxLength={6}
+                value={staffMfaCode} onChange={e => setStaffMfaCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                placeholder="6-digit MFA code" aria-label="Authenticator code" />
+            </label>}
+            <button type="button" className="primary auth-submit" onClick={staffChallengeId ? onStaffMfa : onAdminLogin} disabled={isSubmitting}>
+              {isSubmitting ? 'Verifying...' : staffChallengeId ? 'Verify MFA' : 'Continue'}
             </button>
+            {staffChallengeId && <button type="button" className="secondary" disabled={isSubmitting} onClick={() => { setStaffChallengeId(''); setStaffMfaCode(''); setAdminState(prev => ({ ...prev, authError: '' })); }}>Back to password</button>}
             {adminState.authError && <div className="auth-error">{adminState.authError}</div>}
           </div>
         )}
-
-        <div style={{textAlign:'center',marginTop:18,fontSize:12}}><button type="button" className="secondary" style={{background:'transparent',border:'none',padding:4,fontSize:12}} onClick={() => setMode(mode === 'user' ? 'admin' : 'user')}>{mode === 'user' ? 'Staff login' : 'Back to applicant login'}</button></div>
+        <div style={{textAlign:'center',marginTop:18,fontSize:12}}><a href={mode === 'user' ? '/staff/login' : '/'}>{mode === 'user' ? 'Staff login' : 'Back to applicant login'}</a></div>
 
         {authSummary && (
           <button

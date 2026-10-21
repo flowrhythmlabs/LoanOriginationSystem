@@ -1,0 +1,38 @@
+# DEMO ONLY. Run with --spring.profiles.active=demo,postgres if intended.
+# Never enable demo in a production environment.
+finedge:
+  demo:
+    enabled: ${FINEDGE_DEMO_ENABLED:false}
+  integrations:
+    bureau:
+      mode: ${BUREAU_MODE:disabled}
+      base-url: ${BUREAU_BASE_URL:}
+      api-key: ${BUREAU_API_KEY:}
+    kyc:
+      mode: ${KYC_MODE:disabled}
+      base-url: ${KYC_BASE_URL:}
+      api-key: ${KYC_API_KEY:}
+    bank:
+      mode: ${BANK_MODE:disabled}
+      base-url: ${BANK_BASE_URL:}
+      api-key: ${BANK_API_KEY:}
+    esign:
+      mode: ${ESIGN_MODE:disabled}
+      base-url: ${ESIGN_BASE_URL:}
+      api-key: ${ESIGN_API_KEY:}
+    mandate:
+      mode: ${MANDATE_MODE:disabled}
+      base-url: ${MANDATE_BASE_URL:}
+      api-key: ${MANDATE_API_KEY:}
+    disbursement:
+      mode: ${DISBURSEMENT_MODE:disabled}
+      base-url: ${DISBURSEMENT_BASE_URL:}
+      api-key: ${DISBURSEMENT_API_KEY:}
+    lms:
+      mode: ${LMS_MODE:disabled}
+      base-url: ${LMS_BASE_URL:}
+      api-key: ${LMS_API_KEY:}
+    messaging:
+      mode: ${MESSAGING_MODE:disabled}
+      base-url: ${MESSAGING_BASE_URL:}
+      api-key: ${MESSAGING_API_KEY:}

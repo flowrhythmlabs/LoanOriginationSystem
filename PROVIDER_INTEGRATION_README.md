@@ -1,0 +1,11 @@
+# PostgreSQL + real provider integration
+
+This is a **provider-neutral integration baseline**, not a tested live integration. The Spring Boot backend is required; Netlify-only mock code is not used.
+
+1. Create a PostgreSQL database `finedge_los`, configure `DB_URL`, `DB_USERNAME`, `DB_PASSWORD` and start the backend. Hibernate creates application tables; execute `backend/DATABASE_SEED.sql` to create and seed the product catalog. These are illustrative **product settings**, not real customer records or verified lender-approved rates.
+2. Set `LOS_DEMO_OTP_ENABLED=false`. Configure SMS URL, key, header, sender ID and DLT template ID. The sender POSTs JSON with `mobileNumber`, `otp`, `senderId`, `templateId`. **Provider payload/response contracts vary**; adjust `SmsOtpSender` for the contracted provider, including template variables, accepted response statuses, signatures, and error codes. The provider must be approved for SMS delivery.
+3. Configure bureau URL, key, header, and JSON pointer. The bureau POSTs a JSON object containing `pan`. Real bureau integrations generally require contractual approval, consent audit, extra applicant identifiers, request signing and provider-specific schema. Adjust `MockCreditBureauService` (currently a real-provider adapter despite its legacy name) for your bureau contract. It fails closed when credentials or valid scores are unavailable and never fabricates scores.
+4. Set non-default `LOS_ADMIN_USERNAME` and `LOS_ADMIN_PASSWORD`. Existing in-memory sessions/OTP storage and password comparison are **not production grade**. Add a persistent user table with password hashes, lockout, MFA, rate limiting, auditing, encryption, secrets management, consent and data retention controls before real customer use.
+5. Current KYC provider, frontend eligibility indicator, loan limits, and document checklists have **not all been migrated to database-backed policy**. The `product_configuration` seed table is used for interest rates; extending limits and checklists to the frontend and submission validation remains necessary. No fake applicant or credit score records are seeded.
+
+Run `mvn test` in backend and `npm ci && npm run build` in frontend, and perform provider sandbox tests before enabling live traffic. The actual SMS and bureau vendor specifications are required to guarantee plug-in-and-go operation.
