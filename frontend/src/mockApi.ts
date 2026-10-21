@@ -77,7 +77,7 @@ export async function demoFetch(input:RequestInfo|URL, init:RequestInit = {}):Pr
   }
   if (sub==='kyc' && method==='POST') {
     const payload=body();
-    const status=payload.mockMode==='FAILED'?'FAILED':payload.mockMode==='MANUAL_REVIEW'?'MANUAL_REVIEW':'VERIFIED';
+    const status=payload.mockMode==='FAILED'?'FAILED':['MANUAL','MANUAL_REVIEW'].includes(payload.mockMode)?'MANUAL_REVIEW':'VERIFIED';
     app.kycStatus=status;save(db);await delay(650);return json({status,provider:'DEMO',message:'Simulated KYC result'});
   }
   if (sub==='credit-check' && method==='POST') {
