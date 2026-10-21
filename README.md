@@ -23,7 +23,7 @@ The frontend is a single-page application. Its progress indicator labels five st
 ### Current integration gaps
 
 - The **Run Credit Check** action now saves the current form and calls the application-specific backend credit-check endpoint, which persists the simulated result required for submission. The result is still mock data, not a live bureau result.
-- The latest saved draft for a signed-in user is automatically reopened after login. Backend application listing is filtered to the signed-in user’s mobile number.
+- The latest saved draft for a signed-in user is automatically reopened after login. Backend application listing is filtered to the signed-in userï¿½s mobile number.
 - The KYC mode selector shown in the form is included in a frontend request, but the KYC controller does not forward that value to the provider. The effective mock mode comes from backend configuration/provider behavior.
 - The application-summary download button has no download action. There are no UI actions to approve or reject an application.
 

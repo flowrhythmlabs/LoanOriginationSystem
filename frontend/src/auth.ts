@@ -22,7 +22,7 @@ export const readStoredAuth = (): AuthSession | null => {
       accessToken: parsed.accessToken,
       mobile: parsed.mobile,
       username: parsed.username
-};
+    };
   } catch { return null; }
 };
 
@@ -32,6 +32,5 @@ export const clearAuth = () => sessionStorage.removeItem(AUTH_STORAGE_KEY);
 export const buildAuthHeaders = (session: AuthSession | null) => {
   const headers = new Headers();
   if (session?.accessToken) headers.set('Authorization', `Bearer ${session.accessToken}`);
-
   return headers;
 };

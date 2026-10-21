@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "test": "node --test netlify/functions/lib/otp.test.mjs",
     "preview": "vite preview --host 0.0.0.0"
   },
   "dependencies": {
@@ -17,6 +18,6 @@
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.1",
     "typescript": "^5.5.4",
-    "vite": "^8.3.4"
+    "vite": "^7.0.0"
   }
 }
