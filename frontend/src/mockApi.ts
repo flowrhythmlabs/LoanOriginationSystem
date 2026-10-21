@@ -68,7 +68,7 @@ export async function demoFetch(input:RequestInfo|URL, init:RequestInit = {}):Pr
   if (user.role!=='ADMIN' && app.applicant?.mobileNumber!==user.mobile) return error('This application belongs to another demo user.',403);
   if (!sub && method==='GET') return json(clone(app));
   if (!sub && method==='PUT') {
-    if (['SUBMITTED','APPROVED','REJECTED'].includes(app.status)) return error('Submitted applications cannot be edited.');
+    if (['SUBMITTED','UNDER_REVIEW','APPROVED','REJECTED'].includes(app.status)) return error('Submitted applications cannot be edited.');
     const payload=body();
     app.applicant={...app.applicant,...(payload.applicant || {}),mobileNumber:app.applicant.mobileNumber};
     app.employmentDetails={...app.employmentDetails,...(payload.employmentDetails || {})};
