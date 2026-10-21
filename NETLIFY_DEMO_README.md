@@ -6,7 +6,7 @@ This is a **simulated demonstration**, not a production loan origination service
 
 1. Push the contents of the `LoanOriginationSystem` folder to a Git repository, keeping `netlify.toml` at repository root.
 2. Import the repository in Netlify. Netlify should read `base = "frontend"`, `command = "npm run build"`, `publish = "dist"`.
-3. Alternatively, run `cd frontend && npm ci && npm run build` and drag the `frontend/dist` folder into Netlify Deploys.
+3. Deploy through the Git-connected Netlify build so both the frontend and `frontend/netlify/functions` are deployed. Uploading only `frontend/dist` does not deploy the OTP functions required for applicant login.
 4. The SPA redirect in `netlify.toml` avoids 404s on page refresh.
 
 ## Demo access
