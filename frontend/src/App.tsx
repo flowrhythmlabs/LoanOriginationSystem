@@ -1625,6 +1625,23 @@ function App() {
   };
   useEffect(() => { persistLocalDraft(); }, [currentStep, showUserDashboard, applicationId, localDraftId]);
 
+  const handleGoHome = () => {
+    if (autoSaveTimerRef.current !== null) {
+      window.clearTimeout(autoSaveTimerRef.current);
+      autoSaveTimerRef.current = null;
+    }
+    persistLocalDraft();
+    setShowUserDashboard(true);
+  };
+
+  const handleResumeFromDashboard = (id: number) => {
+    if (id === applicationId && ACTIVE_DRAFT_STATUSES.includes(status) && !submittedApplication) {
+      setShowUserDashboard(false);
+    } else {
+      void handleOpenApplication(id);
+    }
+  };
+
   const resetFormState = () => {
     autoResumeAttemptedRef.current = null;
     draftHydratedRef.current = null;
@@ -1671,7 +1688,14 @@ function App() {
               <a href="#" onClick={(event) => { event.preventDefault(); setStaffApplicationOpen(false); setShowUnderwriting(true); }}>Underwriting</a>
             </>
           ) : (
-            <a className="active" href="#" onClick={(event) => { event.preventDefault(); handleNewApplication(); }}>Application</a>
+            <>
+              <button type="button" className="home-button" title="Go to Dashboard" aria-label="Go to Dashboard" aria-current={showUserDashboard ? 'page' : undefined} disabled={isCreatingApplication} onClick={handleGoHome}>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1Z" />
+                </svg>
+              </button>
+              <a className={showUserDashboard ? undefined : 'active'} href="#" onClick={(event) => { event.preventDefault(); if (staffApplicationOpen) setShowUserDashboard(false); else handleNewApplication(); }}>Application</a>
+            </>
           )}
           <button type="button" className="logout-button" onClick={handleLogout}>Logout</button>
         </nav>
@@ -1685,9 +1709,9 @@ function App() {
           <label className="dashboard-search"><span>Search by Application ID or Mobile Number</span><input value={applicationSearch} onChange={e => setApplicationSearch(e.target.value)} placeholder="Enter application ID or mobile number" /></label>
           {applications.filter(row => { const q = applicationSearch.trim().toLowerCase(); return !q || String(row.losNumber || row.id || '').toLowerCase().includes(q) || String((row as any).mobileNumber || (row as any).applicantMobile || applicant.mobileNumber || '').toLowerCase().includes(q); }).length === 0 && applicationSearch.trim() && <p className="search-empty">No matching application found.</p>}
           {applications.filter(row => { const q = applicationSearch.trim().toLowerCase(); return !q || String(row.losNumber || row.id || '').toLowerCase().includes(q) || String((row as any).mobileNumber || (row as any).applicantMobile || applicant.mobileNumber || '').toLowerCase().includes(q); }).map(row => <div className="application-search-result" key={`search-${row.id}`}><span><strong>{row.losNumber || (row.status === 'DRAFT' ? `DRAFT-${row.id}` : `APP-${row.id}`)}</strong><small>{String(row.status).replaceAll('_',' ')}</small></span><span className={`status-pill status-${String(row.status).toLowerCase()}`}>{String(row.status).replaceAll('_',' ')}</span></div>)}
-          {applications.filter(row => row.status === 'DRAFT' || row.status === 'DOCUMENTS_PENDING' || row.status === 'CREDIT_CHECK_COMPLETED').length > 0 ? applications.filter(row => row.status === 'DRAFT' || row.status === 'DOCUMENTS_PENDING' || row.status === 'CREDIT_CHECK_COMPLETED').slice(0,1).map(row => <div className="card" key={row.id} style={{padding:16,marginBottom:16}}><h3>Continue your application</h3><p>{(row.loanType || 'Loan product not selected').replaceAll('_',' ')} · {row.status === 'DRAFT' ? 'Draft in progress' : row.status.replaceAll('_',' ')}</p><p>Temporary ID: <strong>DRAFT-{row.id}</strong></p><button className="primary" onClick={() => void handleOpenApplication(row.id)}>Continue application</button></div>) : null}
+          {staffApplicationOpen && !submittedApplication && ACTIVE_DRAFT_STATUSES.includes(status) ? <div className="card" style={{padding:16,marginBottom:16}}><h3>Continue your application</h3><p>{loanDetails.loanType.replaceAll('_',' ')} · Step {currentStep} of 5</p><button className="primary" onClick={() => setShowUserDashboard(false)}>Continue application</button></div> : applications.filter(row => ACTIVE_DRAFT_STATUSES.includes(row.status)).slice(0,1).map(row => <div className="card" key={row.id} style={{padding:16,marginBottom:16}}><h3>Continue your application</h3><p>{(row.loanType || 'Loan product not selected').replaceAll('_',' ')} · {row.status === 'DRAFT' ? 'Draft in progress' : row.status.replaceAll('_',' ')}</p><p>Temporary ID: <strong>DRAFT-{row.id}</strong></p><button className="primary" onClick={() => handleResumeFromDashboard(row.id)}>Continue application</button></div>)}
           <h3>Previous applications</h3>
-          {applications.length === 0 ? <p>No previous applications found.</p> : <div className="doc-list">{applications.map(row => <div className="doc-item" key={row.id} style={{display:'flex',justifyContent:'space-between',gap:12,alignItems:'center',padding:12,borderBottom:'1px solid #e3e8ef'}}><div><strong>{(row.loanType || 'Loan product not selected').replaceAll('_',' ')}</strong><div>{row.losNumber || `DRAFT-${row.id}`}</div><small>Status: {row.status.replaceAll('_',' ')} · Stage: {row.status === 'DRAFT' ? 'Applicant' : row.status === 'DOCUMENTS_PENDING' ? 'Documents' : row.status === 'CREDIT_CHECK_COMPLETED' ? 'Verification' : row.status === 'SUBMITTED' ? 'Under review' : row.status} · Owner: {row.status === 'DRAFT' ? 'Applicant' : 'Credit Operations'} · Next action: {row.status === 'DRAFT' ? 'Complete application' : row.status === 'DOCUMENTS_PENDING' ? 'Resolve document requirements' : row.status === 'SUBMITTED' ? 'Await decision' : 'Check verification status'}</small></div>{row.status !== 'SUBMITTED' && row.status !== 'APPROVED' && row.status !== 'REJECTED' && <button className="secondary" onClick={() => void handleOpenApplication(row.id)}>Resume</button>}</div>)}</div>}
+          {applications.length === 0 ? <p>No previous applications found.</p> : <div className="doc-list">{applications.map(row => <div className="doc-item" key={row.id} style={{display:'flex',justifyContent:'space-between',gap:12,alignItems:'center',padding:12,borderBottom:'1px solid #e3e8ef'}}><div><strong>{(row.loanType || 'Loan product not selected').replaceAll('_',' ')}</strong><div>{row.losNumber || `DRAFT-${row.id}`}</div><small>Status: {row.status.replaceAll('_',' ')} · Stage: {row.status === 'DRAFT' ? 'Applicant' : row.status === 'DOCUMENTS_PENDING' ? 'Documents' : row.status === 'CREDIT_CHECK_COMPLETED' ? 'Verification' : row.status === 'SUBMITTED' ? 'Under review' : row.status} · Owner: {row.status === 'DRAFT' ? 'Applicant' : 'Credit Operations'} · Next action: {row.status === 'DRAFT' ? 'Complete application' : row.status === 'DOCUMENTS_PENDING' ? 'Resolve document requirements' : row.status === 'SUBMITTED' ? 'Await decision' : 'Check verification status'}</small></div>{row.status !== 'SUBMITTED' && row.status !== 'APPROVED' && row.status !== 'REJECTED' && <button className="secondary" onClick={() => handleResumeFromDashboard(row.id)}>Resume</button>}</div>)}</div>}
           <div className="inline-actions"><label>Loan product<select value={newApplicationLoanType} onChange={e => setNewApplicationLoanType(e.target.value)}><option value="PERSONAL_LOAN">Personal Loan</option><option value="HOME_LOAN">Home Loan</option><option value="CAR_LOAN">Vehicle Loan</option><option value="EDUCATION_LOAN">Education Loan</option><option value="BUSINESS_LOAN">Business Loan</option><option value="LOAN_AGAINST_PROPERTY">Loan Against Property</option></select></label><button className="secondary" onClick={handleNewApplication}>Start new application</button></div>
         </section>}
         <section className="hero" style={{display: (showUserDashboard && session.role === 'USER') || (session.role === 'ADMIN' && !staffApplicationOpen) ? 'none' : undefined}}>

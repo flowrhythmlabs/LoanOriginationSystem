@@ -249,6 +249,10 @@ button, input, select { font: inherit; }
 .nav { display: flex; gap: 20px; }
 .nav a { color: #dfeaff; text-decoration: none; font-weight: 600; }
 .nav a.active { color: #fff; }
+.nav .home-button { display:inline-flex; align-items:center; justify-content:center; align-self:center; padding:6px; border:0; border-radius:6px; background:transparent; color:#fff; cursor:pointer; }
+.nav .home-button:hover { background:rgba(255,255,255,0.12); }
+.nav .home-button:focus-visible { outline:2px solid #fff; outline-offset:3px; }
+.nav .home-button:disabled { opacity:0.5; cursor:wait; }
 .page { max-width: 1260px; margin: 0 auto; padding: 28px 20px 60px; }
 .hero { display: flex; justify-content: space-between; align-items: center; gap: 24px; margin-bottom: 20px; }
 .hero h1 { margin: 0; font-size: 2.2rem; }

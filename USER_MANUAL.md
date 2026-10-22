@@ -41,6 +41,10 @@ After login, the application form appears. Its sections are on one page. The num
 
 ## Complete a User Application
 
+### Dashboard navigation and resuming
+
+Use the Home icon beside **Application** in the header (tooltip: **Go to Dashboard**) to return to **Your loan dashboard**. It saves the current draft fields and step in this browser's local storage before leaving the form. Select **Application**, **Continue application**, or **Resume** for the open draft to return to the same step without losing entered details. Use **Start new application** only when you intend to begin a different application.
+
 ### 1. Applicant Details
 
 Enter the applicant's full name, date of birth, PAN, mobile number, email addresses, residential address, city, state, and pincode. The mock PAN check expects the format of five letters, four digits, and one letter, for example `ABCDE1234F`. Use a 10-digit Indian mobile number beginning with 6, 7, 8, or 9 when entering applicant details.
