@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { LoginPage } from './LoginPage';
 import { canUseLocalCreditFallback, creditServiceError, CreditServiceUnavailableError, withDevelopmentTimeout } from './creditDevelopment';
 import { buildAuthHeaders, clearAuth, readStoredAuth, type AuthSession } from './auth';
+import { clearLoanDraft, readLoanDraft, writeLoanDraft } from './draftStorage';
 import { ALLOWED_FILE_TYPES, MAX_FILE_SIZE, maskAadhaar, maskAadhaarEntry, editAadhaarEntry, mockIdentityFields, readIdentityFields, validateIdentity, validateIdentityFile, type IdentityFields, type IdentityField, type IdentityType } from './identity';
 
 type Applicant = {
@@ -43,6 +44,30 @@ type LoanDetails = {
   preferredTenure: number | string;
   purposeOfLoan: string;
   additionalDetails?: Record<string, string>;
+};
+
+type LocalDraftSnapshot = {
+  applicationId: number | null;
+  localDraftId: string | null;
+  currentStep: number;
+  highestUnlockedStep: number;
+  applicant: Applicant;
+  employment: Employment;
+  loanDetails: LoanDetails;
+  identityType: IdentityType;
+  identityPanNumber: string;
+  identityConsent: boolean;
+  identityFetched: IdentityFields;
+  creditMode: 'MANUAL' | 'ONLINE';
+  manualCreditScore: string;
+  creditScore: number | null;
+};
+
+const ACTIVE_DRAFT_STATUSES = ['DRAFT', 'DOCUMENTS_PENDING', 'CREDIT_CHECK_COMPLETED'];
+
+const clampStep = (value: unknown) => {
+  const step = Number(value);
+  return Number.isInteger(step) && step >= 1 && step <= 5 ? step : 0;
 };
 
 type ApplicationRow = {
@@ -298,6 +323,8 @@ function App() {
   const [isCreatingApplication, setIsCreatingApplication] = useState(false);
   const applicationCreationRef = useRef<Promise<number> | null>(null);
   const autoResumeAttemptedRef = useRef<string | null>(null);
+  // Mobile number whose saved draft has been checked; local persistence stays off until then so an empty form cannot overwrite it.
+  const draftHydratedRef = useRef<string | null>(null);
   const [mockKycMode, setMockKycMode] = useState('SUCCESS');
   const [validationMessage, setValidationMessage] = useState('');
   const [saveIndicator, setSaveIndicator] = useState('');
@@ -499,11 +526,70 @@ function App() {
       return;
     }
     if (session.role === 'USER' && session.mobile) {
+      if (autoResumeAttemptedRef.current === session.mobile) return;
+      autoResumeAttemptedRef.current = session.mobile;
       setShowUserDashboard(true);
       setApplicant((previous) => ({ ...previous, mobileNumber: session.mobile || previous.mobileNumber }));
+      void resumeDraftOnLogin(session.mobile);
+      return;
     }
     fetchApplications();
   }, [session]);
+
+  const restoreLocalDraft = (draft: LocalDraftSnapshot, mobile: string) => {
+    resetIdentity();
+    const step = clampStep(draft.currentStep) || 1;
+    setApplicationId(draft.applicationId ?? null);
+    localDraftIdRef.current = draft.applicationId ? null : draft.localDraftId ?? null;
+    setLocalDraftId(localDraftIdRef.current);
+    setApplicant({ ...initialApplicant, ...draft.applicant, mobileNumber: mobile, additionalDetails: { ...initialApplicant.additionalDetails, ...(draft.applicant?.additionalDetails || {}) } });
+    setApplicantMobileError('');
+    setEmployment({ ...initialEmployment, ...draft.employment, additionalDetails: { ...initialEmployment.additionalDetails, ...(draft.employment?.additionalDetails || {}) } });
+    setLoanDetails({ ...initialLoanDetails, ...draft.loanDetails, additionalDetails: { ...initialLoanDetails.additionalDetails, ...(draft.loanDetails?.additionalDetails || {}) } });
+    if (draft.loanDetails?.loanType) setNewApplicationLoanType(draft.loanDetails.loanType);
+    setIdentityType(draft.identityType || '');
+    setIdentityPanNumber(draft.identityPanNumber || '');
+    setIdentityConsent(Boolean(draft.identityConsent));
+    setIdentityFetched(draft.identityFetched || {});
+    setCreditMode(draft.creditMode === 'ONLINE' ? 'ONLINE' : 'MANUAL');
+    setManualCreditScore(draft.manualCreditScore || '');
+    setCreditScore(draft.creditScore ?? null);
+    setCreditUsingMock(false);
+    setStatus('DRAFT');
+    setSubmittedApplication(null);
+    setStaffApplicationOpen(true);
+    setCurrentStep(step);
+    setHighestUnlockedStep(Math.max(step, clampStep(draft.highestUnlockedStep) || 1));
+    setShowUserDashboard(false);
+    setSaveIndicator(draft.applicationId ? 'Restored saved draft' : 'Restored local draft — not yet saved to the backend');
+    setValidationMessage('');
+  };
+
+  const resumeDraftOnLogin = async (mobile: string) => {
+    try {
+      const rows = await fetchApplications();
+      if (autoResumeAttemptedRef.current !== mobile) return;
+      const local = readLoanDraft<LocalDraftSnapshot>(mobile);
+      if (local) {
+        const linked = local.applicationId && rows ? rows.find(row => row.id === local.applicationId) : undefined;
+        if (local.applicationId && linked && !ACTIVE_DRAFT_STATUSES.includes(linked.status)) {
+          clearLoanDraft(mobile);
+        } else {
+          // Keep the linked ID when the backend is unreachable; if the backend no longer knows it (e.g. a reset local DB), restore as a new unsaved draft.
+          const restoredApplicationId = local.applicationId && (linked || rows === null) ? local.applicationId : null;
+          restoreLocalDraft({ ...local, applicationId: restoredApplicationId }, mobile);
+          if (restoredApplicationId) await fetchDocuments(restoredApplicationId);
+          return;
+        }
+      }
+      const latestActive = (rows || [])
+        .filter(row => ACTIVE_DRAFT_STATUSES.includes(row.status))
+        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
+      if (latestActive) await handleOpenApplication(latestActive.id);
+    } finally {
+      if (autoResumeAttemptedRef.current === mobile) draftHydratedRef.current = mobile;
+    }
+  };
 
   useEffect(() => {
     if (!session || status === 'SUBMITTED' || status === 'APPROVED' || status === 'REJECTED') return;
@@ -529,18 +615,19 @@ function App() {
     return () => { cancelled = true; };
   }, [session, loanDetails.loanType, applicationId, status]);
 
-  const fetchApplications = async () => {
+  const fetchApplications = async (): Promise<ApplicationRow[] | null> => {
     try {
       const response = await apiFetch('/api/applications');
       if (response.ok) {
         const data = await response.json();
         setApplications(data);
-        // Applicants land on the dashboard and choose which draft to resume.
-      } else {
-        setApplications([]);
+        return Array.isArray(data) ? data : [];
       }
+      setApplications([]);
+      return null;
     } catch {
       setApplications([]);
+      return null;
     }
   };
 
@@ -584,7 +671,11 @@ function App() {
     applicant: {
       ...applicant,
       dateOfBirth: applicant.dateOfBirth || null,
-      additionalDetails: { ...applicant.additionalDetails, identityFetchedFields: JSON.stringify(identityFetched) }
+      additionalDetails: {
+        ...applicant.additionalDetails,
+        identityFetchedFields: JSON.stringify(identityFetched),
+        ...(session?.role === 'USER' ? { draftCurrentStep: String(currentStep) } : {})
+      }
     },
     employment: {
       ...employment,
@@ -741,8 +832,13 @@ function App() {
       setCreditMode(app.applicant?.additionalDetails?.creditScoreMode === 'ONLINE' ? 'ONLINE' : 'MANUAL');
       setStatus(app.status);
       setSubmittedApplication(app.status === 'SUBMITTED' ? app : null);
-      setCurrentStep(app.status === 'SUBMITTED' ? 5 : app.creditCheck ? 4 : 1);
-      setHighestUnlockedStep(app.status === 'SUBMITTED' ? 5 : app.creditCheck ? 4 : 1);
+      const defaultStep = app.status === 'SUBMITTED' ? 5 : app.creditCheck ? 4 : 1;
+      const localResume = session?.role === 'USER' ? readLoanDraft<LocalDraftSnapshot>(session.mobile) : null;
+      const resumeStep = session?.role === 'USER' && ACTIVE_DRAFT_STATUSES.includes(app.status)
+        ? clampStep(localResume && localResume.applicationId === app.id ? localResume.currentStep : app.applicant?.additionalDetails?.draftCurrentStep)
+        : 0;
+      setCurrentStep(resumeStep || defaultStep);
+      setHighestUnlockedStep(Math.max(resumeStep, defaultStep));
       setValidationMessage('');
       await fetchDocuments(app.id);
     } catch (error) {
@@ -825,6 +921,7 @@ function App() {
   }, [loanDetails.requestedLoanAmount, effectiveInterestRate, loanDetails.preferredTenure, loanValidationMessage]);
 
   const handleSaveDraft = async (silent = false) => {
+    persistLocalDraft();
     if (silent && import.meta.env.DEV && localDraftIdRef.current && !applicationId) return;
     try {
       const mobileError = validateMobileNumber(applicant.mobileNumber);
@@ -1204,6 +1301,7 @@ function App() {
       setStatus('SUBMITTED');
       setCurrentStep(5);
       setValidationMessage('');
+      if (session?.role === 'USER') clearLoanDraft(session.mobile);
       await fetchApplications();
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Submission failed';
@@ -1496,12 +1594,52 @@ function App() {
       setIfscMessages(prev => ({ ...prev, [fieldKey]: { text: `${bank.BANK} · ${bank.BRANCH}`, error: false } }));
     } catch (error) { setIfscMessages(prev => ({ ...prev, [fieldKey]: { text: error instanceof Error ? error.message : 'IFSC lookup failed.', error: true } })); }
   };
+  const persistLocalDraft = () => {
+    const mobile = session?.role === 'USER' ? session.mobile : undefined;
+    if (!mobile || draftHydratedRef.current !== mobile || showUserDashboard || submittedApplication || !ACTIVE_DRAFT_STATUSES.includes(status)) return;
+    writeLoanDraft<LocalDraftSnapshot>(mobile, {
+      applicationId,
+      localDraftId: localDraftIdRef.current,
+      currentStep,
+      highestUnlockedStep,
+      applicant,
+      employment,
+      loanDetails,
+      identityType,
+      identityPanNumber,
+      identityConsent,
+      identityFetched,
+      creditMode,
+      manualCreditScore,
+      creditScore
+    });
+  };
+  useEffect(() => { persistLocalDraft(); }, [currentStep, showUserDashboard, applicationId, localDraftId]);
+
+  const resetFormState = () => {
+    autoResumeAttemptedRef.current = null;
+    draftHydratedRef.current = null;
+    setApplicationId(null);
+    localDraftIdRef.current = null; setLocalDraftId(null);
+    setApplicant(initialApplicant); setApplicantMobileError(''); setEmployment(initialEmployment); setLoanDetails(initialLoanDetails);
+    setDocuments(createInitialDocuments());
+    setSelectedFiles(Object.fromEntries(Object.keys(createInitialDocuments()).map((key) => [key, ''])) as Record<DocumentType, string>);
+    setCreditScore(null); setManualCreditScore(''); setCreditMode('MANUAL'); setCreditUsingMock(false);
+    setStatus('DRAFT'); setSubmittedApplication(null); setApplications([]);
+    setCurrentStep(1); setHighestUnlockedStep(1); setShowUserDashboard(true); setStaffApplicationOpen(false); setShowUnderwriting(false);
+    setSaveIndicator(''); setValidationMessage('');
+  };
+
   const scheduleAutoSave = () => { if (session?.role !== 'USER') return; if (autoSaveTimerRef.current !== null) window.clearTimeout(autoSaveTimerRef.current); autoSaveTimerRef.current = window.setTimeout(() => { void handleSaveDraft(true); }, 900); };
   const handleLogout = () => {
+    if (autoSaveTimerRef.current !== null) { window.clearTimeout(autoSaveTimerRef.current); autoSaveTimerRef.current = null; }
+    // Keep loan_draft_<mobile> in localStorage so the applicant can resume after logging back in.
+    persistLocalDraft();
     resetIdentity();
     const authSession = readStoredAuth();
     if (authSession) fetch('/api/auth/logout', { method: 'POST', headers: buildAuthHeaders(authSession) }).catch(() => undefined);
     clearAuth();
+    resetFormState();
     setSession(null);
   };
 
