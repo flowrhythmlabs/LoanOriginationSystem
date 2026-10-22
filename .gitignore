@@ -1,6 +1,7 @@
 **/target/
 **/node_modules/
 **/dist/
+frontend/public/tesseract/
 **/data/
 **/uploads/
 **/.idea/

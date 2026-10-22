@@ -9,6 +9,11 @@
 * { box-sizing: border-box; }
 .identity-block { margin: 0 0 24px; padding: 18px; border: 1px solid #dfe9f9; border-radius: 12px; min-width: 0; }
 .identity-block legend { font-weight: 700; }
+.identity-document-row { display: flex; flex-direction: column; gap: 8px; }
+.identity-document-line { display: flex; align-items: center; justify-content: space-between; gap: 18px; }
+.identity-document-line > select { flex: 1 1 0; min-width: 0; margin: 0; }
+.identity-document-line > .field-hint { flex: 1 1 0; margin: 0; padding: 0; line-height: 1.4; }
+@media (max-width: 980px) { .identity-document-line { flex-direction: column; align-items: stretch; gap: 8px; } }
 .identity-upload { padding: 16px; border: 2px dashed #94a9cd; border-radius: 10px; }
 .identity-consent { display: flex; flex-direction: row; align-items: flex-start; gap: 8px; margin: 12px 0; }
 .identity-consent input[type=checkbox] { width: 18px; min-height: 18px; flex: 0 0 18px; margin: 3px 0 0; }
@@ -328,20 +333,6 @@ th, td { padding: 12px 10px; border-bottom: 1px solid #edf2fb; text-align: left;
 .checkbox-field { display:flex; align-items:center; gap:8px; }
 .checkbox-field input[type=checkbox] { margin:0; }
 .required-asterisk { color:#d92d20; font-weight:700; margin-left:2px; }
-/* Keep required indicators consistent in the contact and additional-details blocks. */
-.required-contact-block label:has(input:not([readonly]):not([type="checkbox"]):not([type="button"]))::before,
-.required-contact-block label:has(> select)::before,
-.required-contact-block label:has(textarea)::before {
-  content: "*";
-  color: #d92d20;
-  font-weight: 700;
-  margin-right: 2px;
-}
-.required-contact-block label:has(> input[type="checkbox"])::after {
-  content: " *";
-  color: #d92d20;
-  font-weight: 700;
-}
 /* Keep required-field asterisks on the same line as their label text. */
 label:has(> .required-asterisk) {
   display: block;
@@ -351,6 +342,9 @@ label:has(> .required-asterisk) > select,
 label:has(> .required-asterisk) > textarea {
   display: block;
   width: 100%;
+  margin-top: 8px;
+}
+label:has(> .required-asterisk) > .required-asterisk ~ span {
   margin-top: 8px;
 }
 label:has(> .required-asterisk) > .field-error,
