@@ -578,6 +578,12 @@ label:has(> .required-asterisk) > .field-success {
 .credit-mode-toggle { display:flex; flex-wrap:wrap; gap:10px; margin:14px 0 18px; }
 .credit-manual-field { max-width:460px; }
 .credit-manual-field input { max-width:240px; }
+.credit-score-status { display:flex; flex-wrap:wrap; align-items:center; gap:6px; }
+.credit-score-rating { display:inline-flex; flex-shrink:0; align-items:center; padding:2px 8px; border:1px solid; border-radius:4px; font-weight:600; }
+.credit-score-rating--excellent { color:#047857; background:#ecfdf5; border-color:#a7f3d0; }
+.credit-score-rating--good { color:#15803d; background:#f0fdf4; border-color:#bbf7d0; }
+.credit-score-rating--fair { color:#b45309; background:#fffbeb; border-color:#fde68a; }
+.credit-score-rating--poor { color:#be123c; background:#fff1f2; border-color:#fecdd3; }
 .credit-temp-id { margin:8px 0 12px; }
 .credit-online-field .primary { margin:12px 0; }
 

@@ -7,6 +7,11 @@ import { buildAuthHeaders, clearAuth, readStoredAuth, type AuthSession } from '.
 import { clearLoanDraft, readLoanDraft, writeLoanDraft } from './draftStorage';
 import { ALLOWED_FILE_TYPES, MAX_FILE_SIZE, maskAadhaar, maskAadhaarEntry, editAadhaarEntry, extractIdentityFromDocument, readIdentityFields, validateIdentity, validateIdentityFile, type IdentityFields, type IdentityField, type IdentityType } from './identity';
 
+function CreditScoreRating({ score }: { score: number }) {
+  const rating = score >= 750 ? 'Excellent' : score >= 700 ? 'Good' : score >= 650 ? 'Fair' : 'Poor';
+  return <span className={`credit-score-rating credit-score-rating--${rating.toLowerCase()}`}>{rating}</span>;
+}
+
 type Applicant = {
   fullName: string;
   dateOfBirth: string;
@@ -1814,7 +1819,11 @@ function App() {
             {applicant.additionalDetails?.maritalStatus === 'Married' && <label>Spouse Name<input value={applicant.additionalDetails?.spouseName || ''} onChange={e => setApplicantExtra('spouseName', e.target.value.replace(/[^A-Za-z .'-]/g, ''))} />{identityTag('spouseName')}</label>}
             <label>Nationality <span className="required-asterisk">*</span><input value={applicant.additionalDetails?.nationality || ''} onChange={e => setApplicantExtra('nationality', e.target.value.replace(/[^A-Za-z .'-]/g, ''))} />{identityTag('nationality')}</label>
             <label>Residential Status<select value={applicant.additionalDetails?.residentialStatus || ''} onChange={e => setApplicantExtra('residentialStatus', e.target.value)}><option value="Resident">Resident</option><option value="NRI">NRI</option><option value="Other">Other</option></select>{identityTag('residentialStatus')}</label>
-            <label>Highest Education Qualification <span className="required-asterisk">*</span><input value={applicant.additionalDetails?.education || ''} onChange={e => setApplicantExtra('education', e.target.value)} />{identityTag('education')}</label>
+            <label>Highest Education Qualification <span className="required-asterisk">*</span><select value={applicant.additionalDetails?.education || ''} onChange={e => setApplicantExtra('education', e.target.value)}>
+              <option value="" disabled>Select</option>
+              {applicant.additionalDetails?.education && !['Below 10th', '10th Pass (SSC)', '12th Pass (HSC)', 'Diploma', 'Graduate', 'Post Graduate', 'Professional Degree (CA / CS / CMA / MBBS / LLB / Engineering)', 'Doctorate', 'Other'].includes(applicant.additionalDetails.education) && <option>{applicant.additionalDetails.education}</option>}
+              <option>Below 10th</option><option>10th Pass (SSC)</option><option>12th Pass (HSC)</option><option>Diploma</option><option>Graduate</option><option>Post Graduate</option><option>Professional Degree (CA / CS / CMA / MBBS / LLB / Engineering)</option><option>Doctorate</option><option>Other</option>
+            </select>{identityTag('education')}</label>
             <label>Alternate Mobile<input inputMode="numeric" maxLength={10} value={applicant.additionalDetails?.alternateMobile || ''} onChange={e => setApplicantExtra('alternateMobile', e.target.value.replace(/\D/g,'').slice(0,10))} />{identityTag('alternateMobile')}</label>
             <label>Residence Type<select value={applicant.additionalDetails?.currentResidenceType || ''} onChange={e => setApplicantExtra('currentResidenceType', e.target.value)}><option value="">Select</option><option>Owned</option><option>Rented</option></select></label>
             {applicant.additionalDetails?.currentResidenceType === 'Rented' && <label>Monthly Rent<input type="number" min="0" value={applicant.additionalDetails?.monthlyRent || ''} onChange={e => setApplicantExtra('monthlyRent', e.target.value)} /></label>}
@@ -2011,11 +2020,11 @@ function App() {
               <input type="number" inputMode="numeric" min={300} max={900} step={1} value={manualCreditScore} onChange={e => { const v = e.target.value; setManualCreditScore(v); setApplicantExtra('selfReportedCreditScore', v); }} placeholder="e.g. 750" />
             </label>
             {manualCreditScore !== '' && (/^[0-9]{3}$/.test(manualCreditScore) && Number(manualCreditScore) >= 300 && Number(manualCreditScore) <= 900 ?
-              <p role="status"><strong>{Number(manualCreditScore) >= 750 ? 'Excellent' : Number(manualCreditScore) >= 700 ? 'Good' : Number(manualCreditScore) >= 650 ? 'Fair' : 'Poor'}</strong> — Self-reported score (not bureau verified).</p>
+              <p className="credit-score-status" role="status"><CreditScoreRating score={Number(manualCreditScore)} /><span>— Self-reported score (not bureau verified).</span></p>
               : <p className="field-error" role="alert">Enter a whole number between 300 and 900.</p>)}
             <p className="subtitle">This is only an indicative classification. Manual entry does not perform a bureau check or verify eligibility.</p>
           </div> : <div className="credit-online-field">
-            <div className="score-box"><div><span className="label">Bureau Credit Score</span><strong>{creditScore ?? '—'}</strong></div>{creditScore !== null && <span className="badge success">{creditScore >= 750 ? 'Excellent' : creditScore >= 700 ? 'Good' : creditScore >= 650 ? 'Fair' : 'Poor'}</span>}</div>
+            <div className="score-box"><div><span className="label">Bureau Credit Score</span><strong>{creditScore ?? '—'}</strong></div>{creditScore !== null && <CreditScoreRating score={creditScore} />}</div>
             {creditUsingMock && <p className="subtitle" role="status">Mock credit score (750) for local development only — not bureau verified or saved to the backend.</p>}
             <button type="button" className="primary" disabled={isCheckingCredit || applicant.additionalDetails?.kycBureauConsent !== 'true'} onClick={() => void handleRunCreditCheck()}>{isCheckingCredit ? 'Checking…' : 'Fetch Credit Score from Bureau'}</button>
             <p className="subtitle">The online check starts only when you click this button after granting consent. Availability depends on the configured bureau provider.</p>

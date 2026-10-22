@@ -153,6 +153,21 @@ test('parses labelled and legacy PAN card layouts', () => {
   });
 });
 
+test('extracts Aadhaar father names from labels and standalone relation lines', () => {
+  const front = 'GOVERNMENT OF INDIA\nPriya Verma\nDOB: 07/11/1992\nFEMALE\n';
+  for (const line of ["Father's Name: Anil Verma", 'Father Name\nAnil Verma', 'S/O: Anil Verma', 'D / O Anil Verma']) {
+    const fields = parseIdentityText(front + line, 'AADHAAR');
+    assert.equal(fields.fatherName, 'Anil Verma', line);
+    assert.equal(fields.fullName, 'Priya Verma');
+    assert.equal(fields.dateOfBirth, '1992-11-07');
+    assert.equal(fields.gender, 'Female');
+    assert.equal(readIdentityFields({ fields }).fatherName, 'Anil Verma');
+  }
+  for (const line of ['W/O: Anil Verma', 'C/O: Anil Verma']) {
+    assert.equal(parseIdentityText(front + line, 'AADHAAR').fatherName, undefined);
+  }
+});
+
 test('returns nothing for unreadable text and rejects Aadhaar numbers failing the checksum', () => {
   assert.deepEqual(parseIdentityText('~~ ## ..\n@@', 'AADHAAR'), {});
   assert.deepEqual(parseIdentityText('', 'PAN'), {});

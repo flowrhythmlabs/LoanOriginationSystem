@@ -179,6 +179,16 @@ export function parseIdentityText(rawText: string, type: IdentityType): Identity
     const aadhaar = [...text.matchAll(/\b(\d{4})\s?(\d{4})\s?(\d{4})\b/g)].map(match => match.slice(1).join('')).find(isValidAadhaar);
     if (aadhaar) fields.aadhaarNumber = maskAadhaar(aadhaar);
     fields.fullName = aadhaarNameAboveDob(rawText);
+    const fatherLabel = lines.findIndex(line => /\bfather'?s?\s*name\b/i.test(line));
+    if (fatherLabel >= 0) {
+      fields.fatherName = cleanName(lines[fatherLabel].replace(/.*\bfather'?s?\s*name\b\s*[:/-]?/i, ''))
+        || cleanName(lines[fatherLabel + 1]);
+    }
+    if (!fields.fatherName) {
+      const relationLine = lines.find(line => /^(?:Address\s*[:/-]?\s*)?[SD]\s*\/\s*O\b/i.test(line));
+      const relationName = relationLine?.match(/^(?:Address\s*[:/-]?\s*)?[SD]\s*\/\s*O\b\s*:?\s*([^,\d]+)/i)?.[1];
+      fields.fatherName = cleanName(relationName);
+    }
     const addressStart = lines.findIndex(line => /\bAddress\b/i.test(line));
     if (addressStart >= 0) {
       const parts: string[] = [];
@@ -189,7 +199,7 @@ export function parseIdentityText(rawText: string, type: IdentityType): Identity
       let address = parts.join(', ').replace(/\s*,\s*(,\s*)*/g, ', ').replace(/^[,\s]+|[,\s]+$/g, '');
       const relation = address.match(/^(S\/O|D\/O|W\/O|C\/O)\s*:?\s*([A-Za-z .']+?)\s*,/i);
       if (relation) {
-        if (/^S\/O|^D\/O/i.test(relation[1])) fields.fatherName = cleanName(relation[2]) || undefined;
+        if (/^S\/O|^D\/O/i.test(relation[1])) fields.fatherName ||= cleanName(relation[2]) || undefined;
         address = address.slice(relation[0].length).trim();
       }
       if (address.replace(/[^A-Za-z0-9]/g, '').length >= 10) fields.residentialAddress = address.slice(0, 250);
