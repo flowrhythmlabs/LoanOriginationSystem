@@ -7,8 +7,8 @@ spring:
   datasource:
     url: ${DB_URL:jdbc:postgresql://localhost:5432/finedge}
     driver-class-name: ${DB_DRIVER_CLASS_NAME:org.postgresql.Driver}
-    username: ${DB_USERNAME:postgres}
-    password: ${DB_PASSWORD:root}
+    username: ${DB_USERNAME:finedge}
+    password: ${DB_PASSWORD:postgres}
   h2:
     console:
       enabled: ${H2_CONSOLE_ENABLED:false}

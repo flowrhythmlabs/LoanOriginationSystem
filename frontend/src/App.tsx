@@ -1685,7 +1685,7 @@ function App() {
             <>
               <a className="active" href="#" onClick={(event) => { event.preventDefault(); setStaffApplicationOpen(false); setShowUnderwriting(false); }}>Recent Applications</a>
               <a href="#" onClick={(event) => { event.preventDefault(); setShowUnderwriting(false); handleNewApplication(); }}>+ New Application</a>
-              <a href="#" onClick={(event) => { event.preventDefault(); setStaffApplicationOpen(false); setShowUnderwriting(true); }}>Underwriting</a>
+              <a href="#" onClick={(event) => { event.preventDefault(); setStaffApplicationOpen(false); setShowUnderwriting(true); }}>Pending Applications / Review</a>
             </>
           ) : (
             <>

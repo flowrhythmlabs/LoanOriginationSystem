@@ -337,6 +337,7 @@ th, td { padding: 12px 10px; border-bottom: 1px solid #edf2fb; text-align: left;
 .checkbox-field { display:flex; align-items:center; gap:8px; }
 .checkbox-field input[type=checkbox] { margin:0; }
 .required-asterisk { color:#d92d20; font-weight:700; margin-left:2px; }
+/* Required markers are authored in JSX; do not generate additional CSS asterisks. */
 /* Keep required-field asterisks on the same line as their label text. */
 label:has(> .required-asterisk) {
   display: block;
