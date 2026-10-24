@@ -12,6 +12,7 @@ The frontend is a single-page application. Its progress indicator labels five st
 
 - A login screen with User and Admin choices. The backend issues expiring bearer sessions; development OTP is generated server-side and is displayed only while the development OTP setting is enabled.
 - Applicant, employment/income, and loan detail forms.
+- Applicant details includes an unchecked-by-default "Add a reference" option. One Reference Details container holds Reference 1 (Optional) and Reference 2 (Optional), each with six optional fields saved with the applicant draft that never block Save Draft or Continue. Unchecking hides both references and preserves entered values.
 - A live frontend EMI estimate based on amount, annual interest rate, and tenure.
 - Mock credit-score and KYC endpoints.
 - UI support to upload, replace, list, and view required documents; the backend also exposes a document-delete API.

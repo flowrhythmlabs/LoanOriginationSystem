@@ -12,7 +12,7 @@ const actionsByStage:Record<string,string[]> = {
 const human = (s:string) => s.replaceAll('_',' ').toLowerCase().replace(/\b\w/g,c=>c.toUpperCase());
 function Details({label,value}:{label:string;value:unknown}) { return <div style={{padding:'8px 0',borderBottom:'1px solid #e5e7eb'}}><strong>{label}: </strong>{value==null || value===''?'—':String(value)}</div>; }
 function Section({title,data}:{title:string;data:RecordMap|undefined}) {
-  return <section style={{marginTop:18}}><h4>{title}</h4>{data ? Object.entries(data).filter(([key])=>!['additionalDetails'].includes(key)).map(([key,value])=><Details key={key} label={human(key)} value={typeof value==='object' ? JSON.stringify(value) : value}/>) : <p>Not provided</p>}{data?.additionalDetails && <details><summary>Additional details</summary>{Object.entries(data.additionalDetails as RecordMap).map(([k,v])=><Details key={k} label={human(k)} value={v}/>)}</details>}</section>;
+  return <section style={{marginTop:18}}><h4>{title}</h4>{data ? Object.entries(data).filter(([key])=>!['additionalDetails'].includes(key)).map(([key,value])=><Details key={key} label={human(key)} value={typeof value==='object' ? JSON.stringify(value) : value}/>) : <p>Not provided</p>}{!!data?.additionalDetails && <details><summary>Additional details</summary>{Object.entries(data.additionalDetails as RecordMap).map(([k,v])=><Details key={k} label={human(k)} value={v}/>)}</details>}</section>;
 }
 export function UnderwritingWorkspace({session}:{session:AuthSession}) {
   const [stage,setStage]=useState(''); const [queue,setQueue]=useState<Row[]>([]); const [selected,setSelected]=useState<Row|null>(null);
