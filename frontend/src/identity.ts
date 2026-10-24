@@ -12,6 +12,31 @@ export const IDENTITY_FIELDS = [
 export type IdentityField = typeof IDENTITY_FIELDS[number];
 export type IdentityFields = Partial<Record<IdentityField, string>>;
 
+export type IdentityLookupRecords = Record<'PAN' | 'AADHAAR', Readonly<Record<string, IdentityFields>>>;
+
+// Explicit test fixtures only, not government-verified identities. Configure approved test records here.
+export const TEST_IDENTITY_RECORDS: IdentityLookupRecords = {
+  PAN: {
+    BNZPM2501F: { fullName: 'Kavita Menon', dateOfBirth: '1988-02-23' },
+    AAAPN1234Q: { fullName: 'Arjun Nair', dateOfBirth: '1990-01-01' }
+  },
+  AADHAAR: {
+    '499118665246': { fullName: 'Priya Verma', dateOfBirth: '1992-11-07' }
+  }
+};
+
+export function lookupIdentityNumber(
+  type: IdentityType, number: string, records: IdentityLookupRecords = TEST_IDENTITY_RECORDS
+): IdentityFields {
+  const error = validateIdentity(type, number, null, true);
+  if (error) throw new Error(error);
+  const record = type ? records[type][number] : undefined;
+  return readIdentityFields({ fields: {
+    ...record,
+    ...(type === 'PAN' ? { panNumber: number } : { aadhaarNumber: number })
+  } });
+}
+
 export const maskAadhaar = (value: string) => value ? `XXXXXXXX${value.slice(-4)}` : '';
 
 export const maskAadhaarEntry = (value: string) => value.replace(/\d(?=\d{4})/g, 'X');
@@ -76,7 +101,7 @@ export function readIdentityFields(payload: unknown): IdentityFields {
   return fields;
 }
 
-export const UNREADABLE_DOCUMENT_MESSAGE = 'We could not read identity details from this document. Please upload a clearer, well-lit image or an unlocked PDF, or enter your details manually. Your entered details have not been cleared.';
+export const UNREADABLE_DOCUMENT_MESSAGE = 'We could not read identity details from this document. Please upload a clearer, well-lit image or an unlocked PDF, or enter your details manually.';
 
 // Verhoeff checksum used by Aadhaar; rejects OCR misreads of the 12 digits.
 const VERHOEFF_D = [[0,1,2,3,4,5,6,7,8,9],[1,2,3,4,0,6,7,8,9,5],[2,3,4,0,1,7,8,9,5,6],[3,4,0,1,2,8,9,5,6,7],[4,0,1,2,3,9,5,6,7,8],[5,9,8,7,6,0,4,3,2,1],[6,5,9,8,7,1,0,4,3,2],[7,6,5,9,8,2,1,0,4,3],[8,7,6,5,9,3,2,1,0,4],[9,8,7,6,5,4,3,2,1,0]];
@@ -84,7 +109,7 @@ const VERHOEFF_P = [[0,1,2,3,4,5,6,7,8,9],[1,5,7,6,2,8,3,0,9,4],[5,8,0,3,7,9,6,1
 export const isValidAadhaar = (digits: string) => /^[2-9]\d{11}$/.test(digits)
   && [...digits].reverse().reduce((check, digit, index) => VERHOEFF_D[check][VERHOEFF_P[index % 8][Number(digit)]], 0) === 0;
 
-const NON_NAME_WORDS = /\b(GOVERNMENT|GOVT|INDIA|INCOME|TAX|DEPARTMENT|PERMANENT|ACCOUNT|NUMBER|CARD|AADHAAR|AADHAR|UNIQUE|IDENTIFICATION|AUTHORITY|ENROLMENT|ENROLLMENT|DOB|BIRTH|DATE|MALE|FEMALE|TRANSGENDER|SIGNATURE|ADDRESS|VID|ISSUE|DOWNLOAD|FATHER|NAME|HELP|WWW|UIDAI)\b/i;
+const NON_NAME_WORDS = /\b(GOVERNMENT|GOVT|INDIA|INCOME|TAX|DEPARTMENT|PERMANENT|ACCOUNT|NUMBER|CARD|AADHAAR|AADHAR|UNIQUE|IDENTIFICATION|AUTHORITY|ENROLMENT|ENROLLMENT|DOB|BIRTH|DATE|MALE|FEMALE|TRANSGENDER|SIGNATURE|ADDRESS|VID|ISSUE|DOWNLOAD|FATHER|MOTHER|NAME|HELP|WWW|UIDAI)\b/i;
 
 const toTitleCase = (value: string) => value.toLowerCase().replace(/\b[a-z]/g, letter => letter.toUpperCase());
 
@@ -92,8 +117,8 @@ const cleanName = (line: string | undefined) => {
   if (!line) return '';
   const stripped = line.replace(/^(name|naam)\s*[:/-]?\s*/i, '').trim();
   // OCR noise (e.g. misread Hindi script) is mostly symbols; real name lines are almost entirely letters.
-  if (stripped.replace(/[A-Za-z .']/g, '').length > Math.max(2, stripped.length * 0.15)) return '';
-  const candidate = stripped.replace(/[^A-Za-z .']/g, ' ').replace(/\s+/g, ' ').trim();
+  if (/\d/.test(stripped) || stripped.replace(/[A-Za-z .'-]/g, '').length > Math.max(2, stripped.length * 0.15)) return '';
+  const candidate = stripped.replace(/[^A-Za-z .'-]/g, ' ').replace(/\s+/g, ' ').trim();
   const words = candidate.split(' ').filter(word => word.replace(/\./g, '').length > 0);
   if (words.length < 1 || words.length > 5 || candidate.replace(/[ .']/g, '').length < 3 || NON_NAME_WORDS.test(candidate)) return '';
   if (!words.some(word => word.replace(/[.']/g, '').length >= 2)) return '';
@@ -111,18 +136,19 @@ const DOB_SPLIT = /\bD\.?\s?[O0]\.?\s?[B8]\b|Date of Birth|Year of Birth|\bYOB\b
 const NON_DOB_DATE = /issue|download|print|generat|valid|expir|enrol/i;
 const OCR_DIGIT = '[0-9OoIl]';
 const DATE_PATTERN = new RegExp(`(?:^|[^0-9A-Za-z])(${OCR_DIGIT}{2})\\s?[/.-]\\s?(${OCR_DIGIT}{2})\\s?[/.-]\\s?([12]${OCR_DIGIT}{3})(?![0-9])`);
+const ISO_DATE_PATTERN = new RegExp(`(?:^|[^0-9A-Za-z])([12]${OCR_DIGIT}{3})\\s?-\\s?(${OCR_DIGIT}{2})\\s?-\\s?(${OCR_DIGIT}{2})(?![0-9])`);
 const toDigits = (value: string) => value.replace(/[Oo]/g, '0').replace(/[Il]/g, '1');
 
-/** Finds a valid dd/mm/yyyy date (tolerating common OCR digit misreads) and returns it as YYYY-MM-DD. */
+/** Normalizes day-first and ISO dates, tolerating common OCR digit misreads. */
 const findDate = (line: string | undefined) => {
+  const iso = line?.match(ISO_DATE_PATTERN);
+  if (iso) return toIsoDate(toDigits(iso[3]), toDigits(iso[2]), toDigits(iso[1]));
   const match = line?.match(DATE_PATTERN);
   return match ? toIsoDate(toDigits(match[1]), toDigits(match[2]), toDigits(match[3])) : '';
 };
 
 const cleanAadhaarName = (line: string | undefined) => {
-  const candidate = line?.replace(/^(name|naam)\s*[:/-]?\s*/i, '').trim().replace(/\s+/g, ' ') || '';
-  if (!/^[A-Za-z]{2,}(?: [A-Za-z]{2,}){1,4}$/.test(candidate) || NON_NAME_WORDS.test(candidate)) return '';
-  return toTitleCase(candidate);
+  return cleanName(line);
 };
 
 const aadhaarNameAboveDob = (rawText: string) => {
@@ -162,7 +188,7 @@ export function parseIdentityText(rawText: string, type: IdentityType): Identity
   if (gender) fields.gender = gender === 'FEMALE' ? 'Female' : gender === 'MALE' ? 'Male' : 'Other';
 
   if (type === 'PAN') {
-    const pan = text.toUpperCase().match(/\b([A-Z]{3}[PCHFATBLJG][A-Z]\d{4}[A-Z])\b/);
+    const pan = text.toUpperCase().match(/\b([A-Z]{5}\d{4}[A-Z])\b/);
     if (pan) fields.panNumber = pan[1];
     // New PAN layout labels the values; the older layout lists name, father's name and DOB in order.
     const fatherLabel = lines.findIndex(line => /father'?s?\s*name/i.test(line));
@@ -175,10 +201,23 @@ export function parseIdentityText(rawText: string, type: IdentityType): Identity
       if (names.length >= 2) { fields.fullName = names[names.length - 2]; fields.fatherName ||= names[names.length - 1]; }
       else if (names.length === 1) fields.fullName = names[0];
     }
+    if (!fields.fullName) {
+      const header = lines.findIndex(line => /INCOME TAX DEPARTMENT/i.test(line));
+      if (header >= 0) fields.fullName = lines.slice(header + 1, header + 5).map(cleanName).find(Boolean);
+    }
   } else {
     const aadhaar = [...text.matchAll(/\b(\d{4})\s?(\d{4})\s?(\d{4})\b/g)].map(match => match.slice(1).join('')).find(isValidAadhaar);
+    const masked = text.match(/(?:^|[^A-Za-z0-9])(?:[Xx*•]{4}\s*){2}(\d{4})(?!\d)/);
     if (aadhaar) fields.aadhaarNumber = maskAadhaar(aadhaar);
-    fields.fullName = aadhaarNameAboveDob(rawText);
+    else if (masked) fields.aadhaarNumber = `XXXXXXXX${masked[1]}`;
+    const nameLabel = lines.findIndex(line => /^(?:name|naam)\b/i.test(line));
+    fields.fullName = nameLabel >= 0
+      ? cleanAadhaarName(lines[nameLabel]) || cleanAadhaarName(lines[nameLabel + 1])
+      : aadhaarNameAboveDob(text);
+    if (!fields.fullName) {
+      const header = lines.findIndex(line => /GOVERNMENT OF INDIA/i.test(line));
+      if (header >= 0) fields.fullName = lines.slice(header + 1, header + 4).map(cleanAadhaarName).find(Boolean);
+    }
     const fatherLabel = lines.findIndex(line => /\bfather'?s?\s*name\b/i.test(line));
     if (fatherLabel >= 0) {
       fields.fatherName = cleanName(lines[fatherLabel].replace(/.*\bfather'?s?\s*name\b\s*[:/-]?/i, ''))
@@ -227,7 +266,7 @@ async function renderPdfPages(file: File, signal: AbortSignal): Promise<{ text: 
     pdf = await task.promise;
   } catch (error) {
     if (error instanceof Error && error.name === 'PasswordException') {
-      throw new Error('This PDF is password-protected. Upload an unlocked PDF or a clear photo/screenshot of the card, or enter your details manually. Your entered details have not been cleared.');
+      throw new Error('This PDF is password-protected. Upload an unlocked PDF or a clear photo/screenshot of the card, or enter your details manually.');
     }
     throw new Error(UNREADABLE_DOCUMENT_MESSAGE);
   }
@@ -300,44 +339,23 @@ async function recognizeImages(images: Array<File | HTMLCanvasElement>, signal: 
 export function resolveIdentityExtraction(
   rawText: string,
   parsedData: IdentityFields & { name?: string; dob?: string },
-  existing: Pick<IdentityFields, 'fullName' | 'dateOfBirth'> = {},
   type: IdentityType = 'AADHAAR'
 ): IdentityFields {
-  console.log("Extracted OCR Text:", rawText);
-  console.log("Parsed Identity Data:", parsedData);
-  const header = rawText.split(/\r?\n/).slice(0, 8)
-    .find(line => !/\d/.test(line) && Boolean(cleanName(line)));
-  const extractedName = type === 'AADHAAR'
-    ? aadhaarNameAboveDob(rawText) || cleanAadhaarName(parsedData.fullName) || cleanAadhaarName(parsedData.name)
-    : parsedData.fullName?.trim() || parsedData.name?.trim() || cleanName(header) || existing.fullName?.trim();
-  const fullName = extractedName || 'Ayush Srivastava';
-  const fields = readIdentityFields({ fields: {
-    ...parsedData, fullName, dateOfBirth: parsedData.dateOfBirth?.trim() || parsedData.dob?.trim()
-  } });
-  if (!fields.dateOfBirth) {
-    for (const line of rawText.split(/\r?\n/)) {
-      if (NON_DOB_DATE.test(line)) continue;
-      for (const match of line.matchAll(/\b(\d{1,2})[/-](\d{1,2})[/-](\d{4})\b/g)) {
-        const date = toIsoDate(match[1], match[2], match[3]);
-        if (date) { fields.dateOfBirth = date; break; }
-      }
-      if (fields.dateOfBirth) break;
-    }
+  const extracted = parseIdentityText(rawText, type);
+  const fullName = extracted.fullName || cleanName(parsedData.fullName || parsedData.name);
+  const values = {
+    ...parsedData, ...extracted, fullName,
+    dateOfBirth: extracted.dateOfBirth || parsedData.dateOfBirth || parsedData.dob
+  };
+  if (!Object.values(values).some(value => typeof value === 'string' && value.trim())) {
+    throw new Error(UNREADABLE_DOCUMENT_MESSAGE);
   }
-  if (!fields.dateOfBirth) {
-    fields.dateOfBirth = readIdentityFields({ fields: { fullName, dateOfBirth: existing.dateOfBirth } }).dateOfBirth;
-  }
-  if (!fields.dateOfBirth || !extractedName) {
-    console.warn('Identity extraction used default applicant details. Review the name and date of birth before saving.');
-  }
-  fields.dateOfBirth ||= '2001-08-01';
-  return fields;
+  return readIdentityFields({ fields: values });
 }
 
-/** Reads the uploaded Aadhaar/PAN image or PDF in the browser and resolves missing applicant fields. */
+/** Reads only the current uploaded Aadhaar/PAN image or PDF in the browser. */
 export async function extractIdentityFromDocument(
-  file: File, type: IdentityType, signal: AbortSignal,
-  existing: Pick<IdentityFields, 'fullName' | 'dateOfBirth'> = {}
+  file: File, type: IdentityType, signal: AbortSignal
 ): Promise<IdentityFields> {
   let fields: IdentityFields = {};
   let rawText = '';
@@ -356,5 +374,5 @@ export async function extractIdentityFromDocument(
     fields = parseIdentityText(rawText, type);
   }
   if (signal.aborted) throw abortError();
-  return resolveIdentityExtraction(rawText, fields, existing, type);
+  return resolveIdentityExtraction(rawText, fields, type);
 }

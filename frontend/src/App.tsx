@@ -5,7 +5,7 @@ import { LoginPage } from './LoginPage';
 import { canUseLocalCreditFallback, creditServiceError, CreditServiceUnavailableError, withDevelopmentTimeout } from './creditDevelopment';
 import { buildAuthHeaders, clearAuth, readStoredAuth, type AuthSession } from './auth';
 import { clearLoanDraft, readLoanDraft, writeLoanDraft } from './draftStorage';
-import { ALLOWED_FILE_TYPES, MAX_FILE_SIZE, maskAadhaar, maskAadhaarEntry, editAadhaarEntry, extractIdentityFromDocument, readIdentityFields, validateIdentity, validateIdentityFile, type IdentityFields, type IdentityField, type IdentityType } from './identity';
+import { ALLOWED_FILE_TYPES, MAX_FILE_SIZE, maskAadhaar, maskAadhaarEntry, editAadhaarEntry, extractIdentityFromDocument, lookupIdentityNumber, readIdentityFields, validateIdentity, validateIdentityFile, type IdentityFields, type IdentityField, type IdentityType } from './identity';
 
 function CreditScoreRating({ score }: { score: number }) {
   const rating = score >= 750 ? 'Excellent' : score >= 700 ? 'Good' : score >= 650 ? 'Fair' : 'Poor';
@@ -287,7 +287,7 @@ function App() {
   const [identityConsent, setIdentityConsent] = useState(false);
   const [identityLoading, setIdentityLoading] = useState(false);
   const [identityError, setIdentityError] = useState('');
-  const [identityUsingMock, setIdentityUsingMock] = useState(false);
+  const [identityLookupMatched, setIdentityLookupMatched] = useState(false);
   const [pincodeMessage, setPincodeMessage] = useState('');
   const pincodeCacheRef = useRef(new Map<string, { city: string; state: string }>());
   const [identityFetched, setIdentityFetched] = useState<IdentityFields>({});
@@ -416,7 +416,7 @@ function App() {
     setIdentityConsent(false);
     setIdentityLoading(false);
     setIdentityError('');
-    setIdentityUsingMock(false);
+    setIdentityLookupMatched(false);
     setIdentityFetched({});
     if (identityFileRef.current) identityFileRef.current.value = '';
   };
@@ -428,21 +428,48 @@ function App() {
       : applicant.additionalDetails?.[key] || '';
   const isIdentityFetched = (key: IdentityField) => Boolean(identityFetched[key] && identityFetched[key] === identityValue(key));
   const identityTag = (key: IdentityField) => isIdentityFetched(key)
-    ? <small className="field-success identity-source-tag">Fetched from Aadhaar / PAN</small> : null;
+    ? <small className="field-success identity-source-tag">Filled from identity document / test record</small> : null;
   const identityFilledCount = (Object.keys(identityFetched) as IdentityField[]).filter(isIdentityFetched).length;
+  const identityNumber = identityType === 'PAN' ? identityPanNumber : applicant.additionalDetails?.aadhaarNumber || '';
+  const identityNumberFormatValid = Boolean(identityType && identityNumber
+    && !validateIdentity(identityType, identityNumber, null, true));
 
-  const chooseIdentityFile = (files: FileList | null) => {
+  const clearIdentityApplicant = (previous: Applicant) => {
+    const additionalDetails: Record<string, string> = { ...previous.additionalDetails, aadhaarNumber: '', age: '' };
+    const next = { ...previous, fullName: '', dateOfBirth: '', panNumber: '', additionalDetails };
+    for (const key of Object.keys(identityFetched) as IdentityField[]) {
+      if (key in initialApplicant) Object.assign(next, { [key]: '' });
+      else next.additionalDetails[key] = '';
+    }
+    return next;
+  };
+
+  const clearIdentityDetails = () => {
+    identityRequestRef.current?.abort();
+    identityRequestRef.current = null;
+    setIdentityLoading(false);
+    setApplicant(clearIdentityApplicant);
+    setIdentityPanNumber('');
+    setIdentityFile(null);
     setIdentityConsent(false);
     setIdentityError('');
-    setIdentityFile(null);
+    setIdentityLookupMatched(false);
+    setIdentityFetched({});
+    setValidationMessage('');
+    if (identityFileRef.current) identityFileRef.current.value = '';
+  };
+
+  const chooseIdentityFile = (files: FileList | null) => {
     if (!files?.length) return;
-    if (files.length !== 1) {
+    const selectedFiles = Array.from(files);
+    clearIdentityDetails();
+    if (selectedFiles.length !== 1) {
       setIdentityError('Please select one Aadhaar or PAN document.');
       return;
     }
-    const error = validateIdentityFile(files[0]);
+    const error = validateIdentityFile(selectedFiles[0]);
     if (error) setIdentityError(error);
-    else setIdentityFile(files[0]);
+    else setIdentityFile(selectedFiles[0]);
     if (identityFileRef.current) identityFileRef.current.value = '';
   };
 
@@ -455,8 +482,13 @@ function App() {
     const controller = new AbortController();
     identityRequestRef.current = controller;
     setIdentityLoading(true);
-    setIdentityUsingMock(false);
-    const applicantAtFetch = applicant;
+    setIdentityLookupMatched(false);
+    setIdentityFetched({});
+    setApplicant(previous => {
+      const next = clearIdentityApplicant(previous);
+      if (!identityFile && identityType === 'AADHAAR') next.additionalDetails.aadhaarNumber = number;
+      return next;
+    });
     let timedOut = false;
     const timeout = window.setTimeout(() => {
       timedOut = true;
@@ -465,61 +497,42 @@ function App() {
     try {
       let fields: IdentityFields;
       if (identityFile) {
-        fields = await extractIdentityFromDocument(identityFile, identityType, controller.signal, {
-          fullName: applicantAtFetch.fullName,
-          dateOfBirth: applicantAtFetch.dateOfBirth
-        });
+        fields = await extractIdentityFromDocument(identityFile, identityType, controller.signal);
       } else {
-        const body = new FormData();
-        body.append('documentType', identityType);
-        body.append('consent', 'true');
-        body.append('number', number);
-        const response = await apiFetch('/api/kyc/identity', { method: 'POST', body, signal: controller.signal });
-        if (controller.signal.aborted) throw new Error('Identity request cancelled.');
-        if (!response.ok) {
-          throw new Error(response.status === 401
-          ? 'Your session expired. Please sign in again. Your entered details have not been cleared.'
-          : response.status === 503
-            ? 'Aadhaar/PAN identity fetching is currently unavailable. Please enter your details manually. Your entered details have not been cleared.'
-            : 'Identity details could not be fetched. Please try again later or enter your details manually. Your entered details have not been cleared.');
-        }
-        fields = readIdentityFields(await response.json());
+        fields = lookupIdentityNumber(identityType, number);
       }
-      if (controller.signal.aborted && !timedOut) return;
+      if (controller.signal.aborted) return;
+      if (!identityFile) setIdentityLookupMatched(Boolean(fields.fullName));
       setApplicant(previous => {
-        const next = { ...previous, additionalDetails: { ...previous.additionalDetails } };
-        if (fields.fullName && previous.fullName === applicantAtFetch.fullName) {
-          next.fullName = fields.fullName;
-        }
-        if (fields.dateOfBirth && previous.dateOfBirth === applicantAtFetch.dateOfBirth) {
-          next.dateOfBirth = fields.dateOfBirth;
-          next.additionalDetails.age = calculateAge(next.dateOfBirth);
-        }
+        const next = clearIdentityApplicant(previous);
+        next.additionalDetails.age = calculateAge(fields.dateOfBirth || '');
         for (const [key, value] of Object.entries(fields)) {
-          if (key === 'fullName' || key === 'dateOfBirth') continue;
           if (key in initialApplicant && key !== 'additionalDetails') {
-            // Do not overwrite manual edits made while extraction was in flight.
-            if (Reflect.get(previous, key) === Reflect.get(applicantAtFetch, key)) {
-              Object.assign(next, { [key]: value });
-            }
-          } else if (previous.additionalDetails?.[key] === applicantAtFetch.additionalDetails?.[key]) {
+            Object.assign(next, { [key]: value });
+          } else {
             next.additionalDetails[key] = value;
           }
         }
+        if (!identityFile && identityType === 'AADHAAR') next.additionalDetails.aadhaarNumber = number;
         if (fields.permanentAddress && next.additionalDetails.permanentAddress === fields.permanentAddress
-          && fields.permanentAddress !== next.residentialAddress
-          && previous.additionalDetails?.sameAsCurrentAddress === applicantAtFetch.additionalDetails?.sameAsCurrentAddress) {
+          && fields.permanentAddress !== next.residentialAddress) {
           next.additionalDetails.sameAsCurrentAddress = 'false';
         }
         return next;
       });
-      setIdentityFetched(previous => ({ ...previous, ...fields }));
+      setIdentityPanNumber(identityType === 'PAN' ? fields.panNumber || '' : '');
+      setIdentityFetched(fields);
+      if (identityFile && (!fields.fullName || !fields.dateOfBirth)) {
+        setIdentityError('Some identity details could not be read clearly. Please enter or review the name and date of birth manually.');
+      } else if (!identityFile && !fields.fullName) {
+        setIdentityError('No configured test identity record matches this number. Please enter the applicant details manually or upload the document.');
+      }
     } catch (error) {
       if (timedOut && identityRequestRef.current === controller) {
-        setIdentityError('Identity fetching took too long. Please retry or enter your details manually. Your entered details have not been cleared.');
+        setIdentityError('Identity fetching took too long. Please retry or enter your details manually.');
       } else if (!controller.signal.aborted) {
         setIdentityError(error instanceof Error && !(error instanceof TypeError) && !(error instanceof SyntaxError)
-          ? error.message : 'Identity details could not be fetched. Please try again later or enter your details manually. Your entered details have not been cleared.');
+          ? error.message : 'Identity details could not be fetched. Please try again later or enter your details manually.');
       }
     } finally {
       window.clearTimeout(timeout);
@@ -1749,32 +1762,29 @@ function App() {
               <label htmlFor="identity-document-select">Identity document</label>
               <div className="identity-document-line">
               <select id="identity-document-select" aria-label="Identity document" value={identityType} disabled={identityLoading} onChange={event => {
+                clearIdentityDetails();
                 setIdentityType(event.target.value as IdentityType);
-                setIdentityConsent(false);
-                setIdentityFile(null);
-                setIdentityError('');
-                if (identityFileRef.current) identityFileRef.current.value = '';
               }}><option value="">Select Aadhaar or PAN</option><option value="AADHAAR">Aadhaar</option><option value="PAN">PAN</option></select>
               <p className="field-hint">Enter the selected document's number below, or upload its document.</p>
               </div>
               </div>
               {identityType === 'PAN' && <label>PAN Number<input maxLength={10} disabled={identityLoading} value={identityPanNumber} onChange={event => {
+                clearIdentityDetails();
                 setIdentityPanNumber(event.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''));
-                setIdentityConsent(false);
               }} onBlur={() => setValidationMessage(identityPanNumber && !validPan(identityPanNumber) ? "PAN should look like ABCDE1234F." : "")} />{identityPanNumber && !validPan(identityPanNumber) && <small className="field-error">PAN should look like ABCDE1234F.</small>}</label>}
               {identityType === 'AADHAAR' && <label className="required-contact-block">Aadhaar Number<input
                 type="text"
                 autoComplete="off" inputMode="numeric"
                 maxLength={applicant.additionalDetails?.aadhaarNumber?.startsWith('XXXXXXXX') ? 14 : 12}
                 disabled={identityLoading}
-                readOnly={isIdentityFetched('aadhaarNumber') && !identityError}
                 value={applicant.additionalDetails?.aadhaarNumber?.startsWith('XXXXXXXX')
                   ? maskAadhaar(applicant.additionalDetails.aadhaarNumber).replace('XXXXXXXX', '\u2022\u2022\u2022\u2022 \u2022\u2022\u2022\u2022 ')
                   : maskAadhaarEntry(applicant.additionalDetails?.aadhaarNumber || '')}
                 onFocus={event => { if (applicant.additionalDetails?.aadhaarNumber?.startsWith('XXXXXXXX')) event.target.select(); }}
                 onChange={event => {
-                setApplicantExtra('aadhaarNumber', editAadhaarEntry(applicant.additionalDetails?.aadhaarNumber || '', event.target.value));
-                if (identityType === 'AADHAAR') setIdentityConsent(false);
+                const number = editAadhaarEntry(applicant.additionalDetails?.aadhaarNumber || '', event.target.value);
+                clearIdentityDetails();
+                setApplicant(previous => ({ ...previous, additionalDetails: { ...previous.additionalDetails, aadhaarNumber: number } }));
               }} />{applicant.additionalDetails?.aadhaarNumber && <small className="field-hint">{maskAadhaar(applicant.additionalDetails.aadhaarNumber)}</small>}{identityTag('aadhaarNumber')}</label>}
               <div className="full-width identity-upload" onDragOver={event => event.preventDefault()} onDrop={event => {
                 event.preventDefault();
@@ -1782,19 +1792,21 @@ function App() {
               }}>
                 <label>Upload Aadhaar / PAN document<input ref={identityFileRef} type="file" accept=".pdf,.jpg,.jpeg,.png" disabled={identityLoading} onChange={event => chooseIdentityFile(event.target.files)} /></label>
                 <small className="field-hint">Accepted file types: PDF, JPG, PNG. Maximum file size: 5 MB. Drag and drop one document here.</small>
-                {identityFile && <div><span>Document selected ({(identityFile.size / 1024).toFixed(1)} KB)</span> <button type="button" className="secondary" disabled={identityLoading} onClick={() => { setIdentityFile(null); setIdentityConsent(false); setIdentityError(''); }}>Remove document</button></div>}
+                {identityFile && <div><span>{identityFile.name} ({(identityFile.size / 1024).toFixed(1)} KB)</span> <button type="button" className="secondary" onClick={clearIdentityDetails}>Remove document</button></div>}
               </div>
               <label className="full-width identity-consent"><input type="checkbox" checked={identityConsent} disabled={identityLoading} onChange={event => setIdentityConsent(event.target.checked)} />I explicitly consent to using my selected Aadhaar/PAN number or document to fetch and pre-fill my identity details.</label>
             </div>
             <button type="button" disabled={identityLoading || !identityConsent} onClick={() => void fetchIdentity()}>{identityLoading && <span className="identity-spinner" aria-hidden="true" />}{identityLoading ? 'Fetching identity details...' : 'Fetch identity details'}</button>
             {identityLoading && <p className="field-hint" role="status">Extracting identity details. You can continue entering applicant details below.</p>}
             {identityError && <div className="validation-box" role="alert">{identityError}</div>}
-            {identityUsingMock && <p className="field-hint" role="status">Using local development demo identity details, not a verified Aadhaar/PAN lookup.</p>}
+            {identityNumberFormatValid && <p className="field-success" role="status">Number format valid</p>}
+            {identityLookupMatched && <p className="field-hint" role="status">Matched a configured test identity record, not a government-verified Aadhaar/PAN lookup. Please review the details.</p>}
+            {identityNumberFormatValid && !identityFile && !identityLookupMatched && <p className="field-hint">Number format validation does not verify identity. If no test record matches, enter the applicant's real name and date of birth below.</p>}
             {identityFilledCount > 0 && <p className="field-success" role="status">{identityFilledCount} fields filled &ndash; please review</p>}
           </fieldset>
           <div className="field-grid">
             <label>Full Name <span className="required-asterisk">*</span><input value={applicant.fullName || ''} onChange={(e) => { const fullName = e.target.value.replace(/[^A-Za-z .'-]/g, ''); setApplicant(previous => ({ ...previous, fullName })); }} onBlur={(e) => { if (e.target.value && !validName(e.target.value)) setValidationMessage("Name should contain letters only."); }} />{applicant.fullName && !validName(applicant.fullName) && <small className="field-error">Name should contain letters only.</small>}{identityTag('fullName')}</label>
-            <label>Date of Birth <span className="required-asterisk">*</span><input type="date" max={new Date().toISOString().slice(0,10)} value={applicant.dateOfBirth || ''} onChange={(e) => { const dateOfBirth = e.target.value; setApplicant(previous => ({ ...previous, dateOfBirth })); }} />{identityTag('dateOfBirth')}</label><label>Age<input readOnly value={calculateAge(applicant.dateOfBirth)} />{identityTag('dateOfBirth')}</label>
+            <label>Date of Birth <span className="required-asterisk">*</span><input type="date" max={new Date().toISOString().slice(0,10)} value={applicant.dateOfBirth || ''} onChange={(e) => { const dateOfBirth = e.target.value; setApplicant(previous => ({ ...previous, dateOfBirth, additionalDetails: { ...previous.additionalDetails, age: calculateAge(dateOfBirth) } })); }} />{identityTag('dateOfBirth')}</label><label>Age<input readOnly value={calculateAge(applicant.dateOfBirth)} />{identityTag('dateOfBirth')}</label>
             <label>Mobile Number <span className="required-asterisk">*</span><input
               type="tel"
               inputMode="numeric"
