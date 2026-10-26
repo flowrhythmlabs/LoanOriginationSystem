@@ -167,7 +167,7 @@ const restoreDocumentFields = (saved: Partial<Applicant>, fields: IdentityFields
       if (Reflect.get(saved, key) == null) Object.assign(restored, { [key]: value });
     } else if (saved.additionalDetails?.[key] === undefined) restored.additionalDetails[key] = value;
   }
-  restored.additionalDetails.age = calculateAge(restored.dateOfBirth);
+  restored.additionalDetails.age = calculateIdentityAge(restored.dateOfBirth, restored.additionalDetails.yearOfBirth);
   return restored;
 };
 
@@ -241,6 +241,9 @@ const validEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 const validPan = (value: string) => /^[A-Z]{5}[0-9]{4}[A-Z]$/.test(value);
 const validName = (value: string) => /^[A-Za-z .'-]+$/.test(value.trim());
 const calculateAge = (date: string) => { if (!date) return ''; const born = new Date(date); if (Number.isNaN(born.getTime())) return ''; const today = new Date(); let age = today.getFullYear() - born.getFullYear(); const monthDiff = today.getMonth() - born.getMonth(); if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < born.getDate())) age--; return age >= 0 ? String(age) : ''; };
+const calculateIdentityAge = (date: string, yearOfBirth = '') => date ? calculateAge(date)
+  : /^(19|20)\d{2}$/.test(yearOfBirth) && Number(yearOfBirth) <= new Date().getFullYear()
+    ? String(new Date().getFullYear() - Number(yearOfBirth)) : '';
 const getVisibleInvalidRequiredFields = () => Array.from(document.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>(
   'input:invalid, select:invalid, textarea:invalid'
 )).filter(field => field.getClientRects().length > 0 && !field.disabled)
@@ -370,6 +373,7 @@ function App() {
   const [identityDocument, setIdentityDocument] = useState<IdentityDocumentMetadata | null>(null);
   const [identityConsent, setIdentityConsent] = useState(false);
   const [identityLoading, setIdentityLoading] = useState(false);
+  const [identityProgress, setIdentityProgress] = useState('');
   const [identityError, setIdentityError] = useState('');
   const [pincodeMessage, setPincodeMessage] = useState('');
   const pincodeCacheRef = useRef(new Map<string, { city: string; state: string }>());
@@ -499,6 +503,7 @@ function App() {
     setIdentityDocument(null);
     setIdentityConsent(false);
     setIdentityLoading(false);
+    setIdentityProgress('');
     setIdentityError('');
     setIdentityFetched({});
     if (identityFileRef.current) identityFileRef.current.value = '';
@@ -526,7 +531,7 @@ function App() {
       if (current !== identityFetched[key]) continue;
       if (key in initialApplicant) Object.assign(next, { [key]: '' });
       else next.additionalDetails[key] = '';
-      if (key === 'dateOfBirth') next.additionalDetails.age = '';
+      if (key === 'dateOfBirth' || key === 'yearOfBirth') next.additionalDetails.age = '';
     }
     delete next.additionalDetails.identityFetchedFields;
     delete next.additionalDetails.identityDocument;
@@ -539,6 +544,7 @@ function App() {
     identityRequestRef.current?.abort();
     identityRequestRef.current = null;
     setIdentityLoading(false);
+    setIdentityProgress('');
     setApplicant(clearIdentityApplicant);
     setIdentityFile(null);
     setIdentityDocument(null);
@@ -579,33 +585,43 @@ function App() {
     const controller = new AbortController();
     identityRequestRef.current = controller;
     setIdentityLoading(true);
+    setIdentityProgress('Reading the selected document...');
     setIdentityFetched({});
     if (identityFile) setIdentityDocument(previous => previous ? { ...previous, fetchedFields: {} } : null);
     setApplicant(previous => {
       const next = clearIdentityApplicant(previous);
       if (identityFile) {
         next.dateOfBirth = '';
+        next.additionalDetails.yearOfBirth = '';
         next.additionalDetails.age = '';
       }
       if (!identityFile && identityType === 'AADHAAR') next.additionalDetails.aadhaarNumber = number;
       return next;
     });
     let timedOut = false;
-    const timeout = window.setTimeout(() => {
+    let timeout = window.setTimeout(() => {
       timedOut = true;
       controller.abort();
     }, 30000);
     try {
       let fields: IdentityFields;
       if (identityFile) {
-        fields = await extractIdentityFromDocument(identityFile, identityType, controller.signal);
+        fields = await extractIdentityFromDocument(identityFile, identityType, controller.signal, message => {
+          if (controller.signal.aborted) return;
+          setIdentityProgress(message);
+          window.clearTimeout(timeout);
+          timeout = window.setTimeout(() => {
+            timedOut = true;
+            controller.abort();
+          }, 60000);
+        });
       } else {
         fields = lookupIdentityNumber(identityType, number);
       }
       if (controller.signal.aborted) return;
       setApplicant(previous => {
         const next = clearIdentityApplicant(previous);
-        if (fields.dateOfBirth) next.additionalDetails.age = calculateAge(fields.dateOfBirth);
+        if (fields.dateOfBirth || fields.yearOfBirth) next.additionalDetails.age = calculateIdentityAge(fields.dateOfBirth || '', fields.yearOfBirth);
         for (const [key, value] of Object.entries(fields)) {
           if (key === 'panNumber' && previous.panNumber) continue;
           if (key in initialApplicant && key !== 'additionalDetails') {
@@ -624,11 +640,11 @@ function App() {
       if (identityType === 'PAN' && fields.panNumber) setIdentityPanNumber(previous => previous || fields.panNumber || '');
       setIdentityFetched(fields);
       if (identityFile) setIdentityDocument(previous => previous ? { ...previous, fetchedFields: fields } : null);
-      if (identityFile && (!fields.fullName || !fields.dateOfBirth)) {
+      if (identityFile && (!fields.fullName || !(fields.dateOfBirth || fields.yearOfBirth))) {
         setIdentityError('Some identity details could not be read clearly. Please enter or review the name and date of birth manually.');
       } else if (!identityFile && !fields.fullName) {
         setIdentityError('Number format validation cannot retrieve personal details. Upload your document or enter your details manually.');
-      }
+      } else setIdentityError('');
     } catch (error) {
       if (timedOut && identityRequestRef.current === controller) {
         setIdentityError('Identity fetching took too long. Please retry or enter your details manually.');
@@ -641,6 +657,7 @@ function App() {
       if (identityRequestRef.current === controller) {
         identityRequestRef.current = null;
         setIdentityLoading(false);
+        setIdentityProgress('');
       }
     }
   };
@@ -1919,15 +1936,16 @@ function App() {
               <label className="full-width identity-consent"><input type="checkbox" checked={identityConsent} disabled={identityLoading} onChange={event => setIdentityConsent(event.target.checked)} />I explicitly consent to using my selected Aadhaar/PAN number or document to fetch and pre-fill my identity details.</label>
             </div>
             <button type="button" disabled={identityLoading || !identityConsent} onClick={() => void fetchIdentity()}>{identityLoading && <span className="identity-spinner" aria-hidden="true" />}{identityLoading ? 'Fetching identity details...' : 'Fetch identity details'}</button>
-            {identityLoading && <p className="field-hint" role="status">Extracting identity details. You can continue entering applicant details below.</p>}
+            {identityLoading && <p className="field-hint" role="status">{identityProgress || 'Extracting identity details...'} You can continue entering applicant details below.</p>}
             {identityError && <div className="validation-box" role="alert">{identityError}</div>}
             {identityNumberFormatValid && <p className="field-success" role="status">Number format valid</p>}
             {identityNumberFormatValid && !identityDocument && <p className="field-hint">Number format validation does not verify identity. Upload the document or enter the applicant's real details below.</p>}
             {identityFilledCount > 0 && <p className="field-success" role="status">{identityFilledCount} fields filled &ndash; please review</p>}
+            {identityFetched.yearOfBirth && !applicant.dateOfBirth && <p className="field-hint" role="status">The document lists only a year of birth ({identityFetched.yearOfBirth}). Age is approximate; enter the full date of birth if known.</p>}
           </fieldset>
           <div className="field-grid">
             <label>Full Name <span className="required-asterisk">*</span><input value={applicant.fullName || ''} onChange={(e) => { const fullName = e.target.value.replace(/[^A-Za-z .'-]/g, ''); setApplicant(previous => ({ ...previous, fullName })); }} onBlur={(e) => { if (e.target.value && !validName(e.target.value)) setValidationMessage("Name should contain letters only."); }} />{applicant.fullName && !validName(applicant.fullName) && <small className="field-error">Name should contain letters only.</small>}{identityTag('fullName')}</label>
-            <label>Date of Birth <span className="required-asterisk">*</span><input type="date" max={new Date().toISOString().slice(0,10)} value={applicant.dateOfBirth || ''} onChange={(e) => { const dateOfBirth = e.target.value; setApplicant(previous => ({ ...previous, dateOfBirth, additionalDetails: { ...previous.additionalDetails, age: calculateAge(dateOfBirth) } })); }} />{identityTag('dateOfBirth')}</label><label>Age<input readOnly value={calculateAge(applicant.dateOfBirth)} />{identityTag('dateOfBirth')}</label>
+            <label>Date of Birth <span className="required-asterisk">*</span><input type="date" max={new Date().toISOString().slice(0,10)} value={applicant.dateOfBirth || ''} onChange={(e) => { const dateOfBirth = e.target.value; setApplicant(previous => ({ ...previous, dateOfBirth, additionalDetails: { ...previous.additionalDetails, yearOfBirth: '', age: calculateAge(dateOfBirth) } })); }} />{identityTag('dateOfBirth')}</label><label>Age<input readOnly value={calculateIdentityAge(applicant.dateOfBirth, applicant.additionalDetails?.yearOfBirth)} />{applicant.dateOfBirth ? identityTag('dateOfBirth') : identityTag('yearOfBirth')}</label>
             <label>Mobile Number <span className="required-asterisk">*</span><input
               type="tel"
               inputMode="numeric"
