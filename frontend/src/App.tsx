@@ -26,6 +26,43 @@ type Applicant = {
   additionalDetails?: Record<string, string>;
 };
 
+type Reference = {
+  fullName: string;
+  relationship: string;
+  mobileNumber: string;
+  referenceIdProofType: string;
+  documentNumber: string;
+  addressCity: string;
+};
+
+const MAX_REFERENCES = 3;
+const referenceFieldSuffixes: Record<keyof Reference, string> = {
+  fullName: 'FullName',
+  relationship: 'Relationship',
+  mobileNumber: 'Mobile',
+  referenceIdProofType: 'IdProofType',
+  documentNumber: 'IdNumber',
+  addressCity: 'Address'
+};
+const createReference = (): Reference => ({
+  fullName: '', relationship: '', mobileNumber: '', referenceIdProofType: '', documentNumber: '', addressCity: ''
+});
+const referencePrefix = (index: number) => index === 0 ? 'reference' : `reference${index + 1}`;
+const readReferences = (details: Record<string, string> = {}): Reference[] => {
+  if (details.showReference !== 'true') return [];
+  const savedReferences = Array.from({ length: MAX_REFERENCES }, (_, index) => {
+    const reference = createReference();
+    for (const field of Object.keys(referenceFieldSuffixes) as Array<keyof Reference>) {
+      reference[field] = details[`${referencePrefix(index)}${referenceFieldSuffixes[field]}`] || '';
+    }
+    return reference;
+  });
+  const lastPopulatedIndex = savedReferences.reduce((last, reference, index) => Object.values(reference).some(Boolean) ? index : last, 0);
+  const savedCount = Number(details.referenceCount);
+  const count = Number.isInteger(savedCount) && savedCount >= 1 && savedCount <= MAX_REFERENCES ? savedCount : lastPopulatedIndex + 1;
+  return savedReferences.slice(0, count);
+};
+
 const formatIndianIncome = (value: number | string) => {
   const digits = String(value ?? '').replace(/\D/g, '');
   return digits ? Number(digits).toLocaleString('en-IN') : '';
@@ -281,6 +318,34 @@ const statusColors: Record<string, string> = {
 function App() {
   const [session, setSession] = useState<AuthSession | null>(() => readStoredAuth());
   const [applicant, setApplicant] = useState<Applicant>(initialApplicant);
+  const [references, setReferences] = useState<Reference[]>([]);
+
+  useEffect(() => {
+    setReferences(readReferences(applicant.additionalDetails));
+  }, [applicant.additionalDetails]);
+
+  const updateReferences = (nextReferences: Reference[]) => {
+    setReferences(nextReferences);
+    setApplicant(previous => {
+      const additionalDetails: Record<string, string> = {
+        ...previous.additionalDetails,
+        showReference: String(nextReferences.length > 0),
+        referenceCount: String(nextReferences.length)
+      };
+      // Keep the existing flat reference fields compatible with saved drafts and payloads.
+      for (let index = 0; index < MAX_REFERENCES; index += 1) {
+        for (const field of Object.keys(referenceFieldSuffixes) as Array<keyof Reference>) {
+          const key = `${referencePrefix(index)}${referenceFieldSuffixes[field]}`;
+          if (nextReferences[index]) additionalDetails[key] = nextReferences[index][field];
+          else delete additionalDetails[key];
+        }
+      }
+      return { ...previous, additionalDetails };
+    });
+  };
+  const updateReferenceField = (index: number, field: keyof Reference, value: string) => {
+    updateReferences(references.map((reference, referenceIndex) => referenceIndex === index ? { ...reference, [field]: value } : reference));
+  };
   const [identityType, setIdentityType] = useState<IdentityType>('');
   const [identityPanNumber, setIdentityPanNumber] = useState('');
   const [identityFile, setIdentityFile] = useState<File | null>(null);
@@ -1962,18 +2027,28 @@ function App() {
             <label>Branch<input required value={applicant.additionalDetails?.guarantorBranch || ''} onChange={e => setApplicantExtra('guarantorBranch', e.target.value)} /></label>
             <label>Account Type<select required value={applicant.additionalDetails?.guarantorAccountType || ''} onChange={e => setApplicantExtra('guarantorAccountType', e.target.value)}><option value="">Select</option><option>Savings</option><option>Current</option></select></label>
             </div></section>}
-            <label className="full-width checkbox-field inline-checkbox-field"><span><input type="checkbox" checked={showReference} aria-expanded={showReference} aria-controls="reference-details" onChange={event => setApplicantExtra('showReference', String(event.target.checked))} /></span>Add a reference</label>
+            <label className="full-width checkbox-field inline-checkbox-field"><span><input type="checkbox" checked={showReference} aria-expanded={showReference} aria-controls="reference-details" onChange={event => updateReferences(event.target.checked ? [createReference()] : [])} /></span>Add a reference</label>
             {showReference && <div id="reference-details" className="full-width optional-reference-block">
             <div className="optional-reference-content">
-            <section className="card form-card" aria-label="Reference Details"><h3>Reference Details</h3>
-            {['reference', 'reference2'].map((prefix, index) => <section key={prefix} aria-label={`Reference ${index + 1} (Optional)`}>
+            <section className="card form-card" aria-label="Reference Details">
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+            <h3>Reference Details</h3>
+            <div style={{ display: 'flex', gap: 8 }}>
+            <button type="button" className="secondary" aria-label="Add reference" title="Add reference" disabled={references.length >= MAX_REFERENCES} onClick={() => {
+              if (references.length < MAX_REFERENCES) updateReferences([...references, createReference()]);
+            }}>+</button>
+            <button type="button" className="secondary" aria-label="Remove reference" title="Remove last reference" disabled={references.length <= 1} onClick={() => {
+              if (references.length > 1) updateReferences(references.slice(0, -1));
+            }}>-</button>
+            </div></div>
+            {references.map((reference, index) => <section key={index} aria-label={`Reference ${index + 1} (Optional)`}>
             <h4>Reference {index + 1} (Optional)</h4><div className="field-grid">
-            <label>Full Name<input type="text" value={applicant.additionalDetails?.[`${prefix}FullName`] || ''} onChange={e => setApplicantExtra(`${prefix}FullName`, e.target.value)} /></label>
-            <label>Relationship<select value={applicant.additionalDetails?.[`${prefix}Relationship`] || ''} onChange={e => setApplicantExtra(`${prefix}Relationship`, e.target.value)}><option value="">Select</option><option>Father</option><option>Mother</option><option>Sibling</option><option>Friend</option><option>Colleague</option><option>Relative</option><option>Other</option></select></label>
-            <label>Mobile Number<input inputMode="numeric" maxLength={10} value={applicant.additionalDetails?.[`${prefix}Mobile`] || ''} onChange={e => setApplicantExtra(`${prefix}Mobile`, e.target.value.replace(/\D/g, '').slice(0, 10))} /></label>
-            <label>Reference ID Proof Type<select value={applicant.additionalDetails?.[`${prefix}IdProofType`] || ''} onChange={e => setApplicantExtra(`${prefix}IdProofType`, e.target.value)}><option value="">Select</option><option>Aadhaar Card</option><option>PAN Card</option><option>Voter ID</option><option>Passport</option><option>Driving Licence</option></select></label>
-            <label>Document / ID Number<input type="text" value={applicant.additionalDetails?.[`${prefix}IdNumber`] || ''} onChange={e => setApplicantExtra(`${prefix}IdNumber`, e.target.value)} /></label>
-            <label>Address / City<input type="text" value={applicant.additionalDetails?.[`${prefix}Address`] || ''} onChange={e => setApplicantExtra(`${prefix}Address`, e.target.value)} /></label>
+            <label>Full Name<input type="text" value={reference.fullName} onChange={e => updateReferenceField(index, 'fullName', e.target.value)} /></label>
+            <label>Relationship<select value={reference.relationship} onChange={e => updateReferenceField(index, 'relationship', e.target.value)}><option value="">Select</option><option>Father</option><option>Mother</option><option>Sibling</option><option>Friend</option><option>Colleague</option><option>Relative</option><option>Other</option></select></label>
+            <label>Mobile Number<input inputMode="numeric" maxLength={10} value={reference.mobileNumber} onChange={e => updateReferenceField(index, 'mobileNumber', e.target.value.replace(/\D/g, '').slice(0, 10))} /></label>
+            <label>Reference ID Proof Type<select value={reference.referenceIdProofType} onChange={e => updateReferenceField(index, 'referenceIdProofType', e.target.value)}><option value="">Select</option><option>Aadhaar Card</option><option>PAN Card</option><option>Voter ID</option><option>Passport</option><option>Driving Licence</option></select></label>
+            <label>Document / ID Number<input type="text" value={reference.documentNumber} onChange={e => updateReferenceField(index, 'documentNumber', e.target.value)} /></label>
+            <label>Address / City<input type="text" value={reference.addressCity} onChange={e => updateReferenceField(index, 'addressCity', e.target.value)} /></label>
             </div></section>)}
             </section>
             </div></div>}
