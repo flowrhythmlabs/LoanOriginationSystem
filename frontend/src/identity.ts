@@ -14,19 +14,8 @@ export type IdentityFields = Partial<Record<IdentityField, string>>;
 
 export type IdentityLookupRecords = Record<'PAN' | 'AADHAAR', Readonly<Record<string, IdentityFields>>>;
 
-// Explicit test fixtures only, not government-verified identities. Configure approved test records here.
-export const TEST_IDENTITY_RECORDS: IdentityLookupRecords = {
-  PAN: {
-    BNZPM2501F: { fullName: 'Kavita Menon', dateOfBirth: '1988-02-23' },
-    AAAPN1234Q: { fullName: 'Arjun Nair', dateOfBirth: '1990-01-01' }
-  },
-  AADHAAR: {
-    '499118665246': { fullName: 'Priya Verma', dateOfBirth: '1992-11-07' }
-  }
-};
-
 export function lookupIdentityNumber(
-  type: IdentityType, number: string, records: IdentityLookupRecords = TEST_IDENTITY_RECORDS
+  type: IdentityType, number: string, records: IdentityLookupRecords = { PAN: {}, AADHAAR: {} }
 ): IdentityFields {
   const error = validateIdentity(type, number, null, true);
   if (error) throw new Error(error);
@@ -109,12 +98,14 @@ const VERHOEFF_P = [[0,1,2,3,4,5,6,7,8,9],[1,5,7,6,2,8,3,0,9,4],[5,8,0,3,7,9,6,1
 export const isValidAadhaar = (digits: string) => /^[2-9]\d{11}$/.test(digits)
   && [...digits].reverse().reduce((check, digit, index) => VERHOEFF_D[check][VERHOEFF_P[index % 8][Number(digit)]], 0) === 0;
 
-const NON_NAME_WORDS = /\b(GOVERNMENT|GOVT|INDIA|INCOME|TAX|DEPARTMENT|PERMANENT|ACCOUNT|NUMBER|CARD|AADHAAR|AADHAR|UNIQUE|IDENTIFICATION|AUTHORITY|ENROLMENT|ENROLLMENT|DOB|BIRTH|DATE|MALE|FEMALE|TRANSGENDER|SIGNATURE|ADDRESS|VID|ISSUE|DOWNLOAD|FATHER|MOTHER|NAME|HELP|WWW|UIDAI)\b/i;
+const NON_NAME_WORDS = /\b(GOVERNMENT|GOVT|INDIA|INCOME|TAX|DEPARTMENT|PERMANENT|ACCOUNT|NUMBER|CARD|AADHAAR|AADHAR|UNIQUE|IDENTIFICATION|AUTHORITY|ENROLMENT|ENROLLMENT|DOB|BIRTH|DATE|MALE|FEMALE|TRANSGENDER|SIGNATURE|ADDRESS|VID|ISSUE|DOWNLOAD|FATHER|MOTHER|NAME|HELP|WWW|UIDAI|TO|CARE|OF)\b/i;
 
 const toTitleCase = (value: string) => value.toLowerCase().replace(/\b[a-z]/g, letter => letter.toUpperCase());
 
 const cleanName = (line: string | undefined) => {
   if (!line) return '';
+  if (line.includes('[unreadable]')) return '';
+  if (/\b[SDWC]\s*\/\s*O\b|Care\s+of\b/i.test(line)) return '';
   const stripped = line.replace(/^(name|naam)\s*[:/-]?\s*/i, '').trim();
   // OCR noise (e.g. misread Hindi script) is mostly symbols; real name lines are almost entirely letters.
   if (/\d/.test(stripped) || stripped.replace(/[A-Za-z .'-]/g, '').length > Math.max(2, stripped.length * 0.15)) return '';
@@ -172,13 +163,24 @@ export function parseIdentityText(rawText: string, type: IdentityType): Identity
 
   // Prefer a date next to a DOB label; never use issue/download dates printed on the card.
   const dobLabel = (line: string) => DOB_LABEL.test(line) && !NON_DOB_DATE.test(line);
-  let dobIndex = lines.findIndex((line, index) => dobLabel(line) && (findDate(line) || findDate(lines[index + 1])));
-  if (dobIndex >= 0) fields.dateOfBirth = findDate(lines[dobIndex]) || findDate(lines[dobIndex + 1]);
-  else {
-    dobIndex = lines.findIndex(line => !NON_DOB_DATE.test(line) && findDate(line));
+  const labelledDate = (index: number) => {
+    const line = lines[index];
+    const sameLine = findDate(line);
+    if (sameLine) return sameLine;
+    const label = line.match(DOB_LABEL);
+    const suffix = label ? line.slice((label.index || 0) + label[0].length) : line;
+    const nextLine = lines[index + 1];
+    return !suffix.replace(/[\s:./-]/g, '') && nextLine && !NON_DOB_DATE.test(nextLine) ? findDate(nextLine) : '';
+  };
+  let dobIndex = lines.findIndex((line, index) => dobLabel(line) && labelledDate(index));
+  if (dobIndex >= 0) fields.dateOfBirth = labelledDate(dobIndex);
+  else if (!lines.some(dobLabel)) {
+    const standaloneDates = lines.map((line, index) => ({ line, index }))
+      .filter(({ line }) => !NON_DOB_DATE.test(line) && Boolean(findDate(line))
+        && /^[\dOoIl\s/.-]+$/.test(line));
+    dobIndex = standaloneDates.length === 1 ? standaloneDates[0].index : -1;
     if (dobIndex >= 0) fields.dateOfBirth = findDate(lines[dobIndex]);
-    else dobIndex = lines.findIndex(dobLabel);
-  }
+  } else dobIndex = lines.findIndex(dobLabel);
   // OCR sometimes merges the name and the DOB onto one line, e.g. "Priya Verma DOB: 07/11/1992";
   // a prefix ending in "/" is the misread Hindi DOB label ("जन्म तिथि/DOB"), not a name.
   const dobPrefix = dobIndex >= 0 ? lines[dobIndex].split(DOB_SPLIT)[0].trim() : '';
@@ -196,12 +198,12 @@ export function parseIdentityText(rawText: string, type: IdentityType): Identity
     if (nameLabel >= 0) fields.fullName = cleanName(lines[nameLabel].replace(/.*\bname\b\s*[:/-]?/i, '')) || cleanName(lines[nameLabel + 1]);
     if (fatherLabel >= 0) fields.fatherName = cleanName(lines[fatherLabel].replace(/.*father'?s?\s*name\s*[:/-]?/i, '')) || cleanName(lines[fatherLabel + 1]);
     if (!fields.fullName && dobIndex > 0 && nameLabel < 0 && nameBeforeDob) fields.fullName = nameBeforeDob;
-    if (!fields.fullName && dobIndex > 0) {
+    if (!fields.fullName && dobIndex > 0 && nameLabel < 0) {
       const names = lines.slice(0, dobIndex).map(cleanName).filter(Boolean);
       if (names.length >= 2) { fields.fullName = names[names.length - 2]; fields.fatherName ||= names[names.length - 1]; }
       else if (names.length === 1) fields.fullName = names[0];
     }
-    if (!fields.fullName) {
+    if (!fields.fullName && nameLabel < 0) {
       const header = lines.findIndex(line => /INCOME TAX DEPARTMENT/i.test(line));
       if (header >= 0) fields.fullName = lines.slice(header + 1, header + 5).map(cleanName).find(Boolean);
     }
@@ -211,37 +213,45 @@ export function parseIdentityText(rawText: string, type: IdentityType): Identity
     if (aadhaar) fields.aadhaarNumber = maskAadhaar(aadhaar);
     else if (masked) fields.aadhaarNumber = `XXXXXXXX${masked[1]}`;
     const nameLabel = lines.findIndex(line => /^(?:name|naam)\b/i.test(line));
+    const toLabel = lines.findIndex(line => /^To\s*[:/-]?(?:\s|$)/i.test(line));
     fields.fullName = nameLabel >= 0
       ? cleanAadhaarName(lines[nameLabel]) || cleanAadhaarName(lines[nameLabel + 1])
-      : aadhaarNameAboveDob(text);
-    if (!fields.fullName) {
+      : toLabel >= 0
+        ? cleanName(lines[toLabel].replace(/^To\s*[:/-]?\s*/i, '')) || cleanName(lines[toLabel + 1])
+        : aadhaarNameAboveDob(text);
+    if (!fields.fullName && nameLabel < 0 && toLabel < 0) {
       const header = lines.findIndex(line => /GOVERNMENT OF INDIA/i.test(line));
       if (header >= 0) fields.fullName = lines.slice(header + 1, header + 4).map(cleanAadhaarName).find(Boolean);
     }
-    const fatherLabel = lines.findIndex(line => /\bfather'?s?\s*name\b/i.test(line));
+    const fatherLabel = lines.findIndex(line => /\bfather(?:'?s)?(?:\s*name)?\b/i.test(line));
     if (fatherLabel >= 0) {
-      fields.fatherName = cleanName(lines[fatherLabel].replace(/.*\bfather'?s?\s*name\b\s*[:/-]?/i, ''))
+      fields.fatherName = cleanName(lines[fatherLabel].replace(/.*\bfather(?:'?s)?(?:\s*name)?\b\s*[:/-]?/i, ''))
         || cleanName(lines[fatherLabel + 1]);
     }
     if (!fields.fatherName) {
-      const relationLine = lines.find(line => /^(?:Address\s*[:/-]?\s*)?[SD]\s*\/\s*O\b/i.test(line));
-      const relationName = relationLine?.match(/^(?:Address\s*[:/-]?\s*)?[SD]\s*\/\s*O\b\s*:?\s*([^,\d]+)/i)?.[1];
-      fields.fatherName = cleanName(relationName);
+      const relationIndex = lines.findIndex(line => /^(?:Address\s*[:/-]?\s*)?(?:[SDWC]\s*\/\s*O\b|Care\s+of\b)/i.test(line));
+      if (relationIndex >= 0) {
+        const relationName = lines[relationIndex].match(/^(?:Address\s*[:/-]?\s*)?(?:[SDWC]\s*\/\s*O\b|Care\s+of\b)\s*:?\s*([^,\d]*)/i)?.[1];
+        fields.fatherName = cleanName(relationName) || cleanName(lines[relationIndex + 1]);
+      }
     }
-    const addressStart = lines.findIndex(line => /\bAddress\b/i.test(line));
+    const addressLabel = lines.findIndex(line => /\bAddress\b/i.test(line));
+    const relationStart = lines.findIndex(line => /^(?:[SDWC]\s*\/\s*O\b|Care\s+of\b)/i.test(line));
+    const addressStart = addressLabel >= 0 ? addressLabel : relationStart;
     if (addressStart >= 0) {
       const parts: string[] = [];
       for (const line of lines.slice(addressStart, addressStart + 8)) {
+        if (/\b(?:UIDAI|www|help|VID|download|issue)\b|(?:[Xx*]{4}\s*){2}\d{4}|\b\d{4}\s\d{4}\s\d{4}\b/i.test(line)) break;
         parts.push(line.replace(/^.*?\bAddress\b\s*[:-]?\s*/i, ''));
         if (/\b[1-9]\d{2}\s?\d{3}\b/.test(line)) break;
       }
       let address = parts.join(', ').replace(/\s*,\s*(,\s*)*/g, ', ').replace(/^[,\s]+|[,\s]+$/g, '');
-      const relation = address.match(/^(S\/O|D\/O|W\/O|C\/O)\s*:?\s*([A-Za-z .']+?)\s*,/i);
+      const relation = address.match(/^(?:[SDWC]\s*\/\s*O|Care\s+of)\s*:?\s*,?\s*([A-Za-z .']+?)\s*,/i);
       if (relation) {
-        if (/^S\/O|^D\/O/i.test(relation[1])) fields.fatherName ||= cleanName(relation[2]) || undefined;
+        fields.fatherName ||= cleanName(relation[1]) || undefined;
         address = address.slice(relation[0].length).trim();
       }
-      if (address.replace(/[^A-Za-z0-9]/g, '').length >= 10) fields.residentialAddress = address.slice(0, 250);
+      if (!address.includes('[unreadable]') && address.replace(/[^A-Za-z0-9]/g, '').length >= 10) fields.residentialAddress = address.slice(0, 250);
       const pin = address.match(/\b([1-9]\d{2})\s?(\d{3})\b(?!.*\b[1-9]\d{2}\s?\d{3}\b)/);
       if (pin) fields.pincode = pin[1] + pin[2];
     }
@@ -327,7 +337,11 @@ async function recognizeImages(images: Array<File | HTMLCanvasElement>, signal: 
     let text = '';
     for (const image of images) {
       if (signal.aborted) throw abortError();
-      text += (await worker.recognize(image)).data.text + '\n';
+      const { data } = await worker.recognize(image, {}, { blocks: true });
+      const lines = data.blocks?.flatMap(block => block.paragraphs.flatMap(paragraph => paragraph.lines));
+      text += (lines?.length
+        ? lines.map(line => confidentIdentityText(line.text, line.confidence) || '[unreadable]').join('\n')
+        : confidentIdentityText(data.text, data.confidence)) + '\n';
     }
     return text;
   } finally {
@@ -336,21 +350,19 @@ async function recognizeImages(images: Array<File | HTMLCanvasElement>, signal: 
   }
 }
 
+export const MIN_IDENTITY_OCR_CONFIDENCE = 60;
+export const confidentIdentityText = (text: string, confidence: number) =>
+  Number.isFinite(confidence) && confidence >= MIN_IDENTITY_OCR_CONFIDENCE ? text : '';
+
 export function resolveIdentityExtraction(
   rawText: string,
-  parsedData: IdentityFields & { name?: string; dob?: string },
   type: IdentityType = 'AADHAAR'
 ): IdentityFields {
   const extracted = parseIdentityText(rawText, type);
-  const fullName = extracted.fullName || cleanName(parsedData.fullName || parsedData.name);
-  const values = {
-    ...parsedData, ...extracted, fullName,
-    dateOfBirth: extracted.dateOfBirth || parsedData.dateOfBirth || parsedData.dob
-  };
-  if (!Object.values(values).some(value => typeof value === 'string' && value.trim())) {
+  if (!Object.keys(extracted).length) {
     throw new Error(UNREADABLE_DOCUMENT_MESSAGE);
   }
-  return readIdentityFields({ fields: values });
+  return readIdentityFields({ fields: extracted });
 }
 
 /** Reads only the current uploaded Aadhaar/PAN image or PDF in the browser. */
@@ -364,7 +376,8 @@ export async function extractIdentityFromDocument(
     rawText = text;
     fields = parseIdentityText(text, type);
     // Text-layer PDFs are exact; fall back to OCR for scanned PDFs or when key fields are missing.
-    if (!fields.fullName || !fields.dateOfBirth || !(fields.aadhaarNumber || fields.panNumber)) {
+    if (!fields.fullName || !fields.dateOfBirth || !(fields.aadhaarNumber || fields.panNumber)
+      || (type === 'AADHAAR' && (!fields.fatherName || !fields.residentialAddress))) {
       const ocrText = await recognizeImages(images, signal);
       rawText += '\n' + ocrText;
       fields = { ...parseIdentityText(ocrText, type), ...fields };
@@ -374,5 +387,5 @@ export async function extractIdentityFromDocument(
     fields = parseIdentityText(rawText, type);
   }
   if (signal.aborted) throw abortError();
-  return resolveIdentityExtraction(rawText, fields, type);
+  return resolveIdentityExtraction(rawText, type);
 }

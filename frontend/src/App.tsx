@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { LoginPage } from './LoginPage';
 import { canUseLocalCreditFallback, creditServiceError, CreditServiceUnavailableError, withDevelopmentTimeout } from './creditDevelopment';
 import { buildAuthHeaders, clearAuth, readStoredAuth, type AuthSession } from './auth';
-import { clearLoanDraft, readLoanDraft, writeLoanDraft } from './draftStorage';
+import { clearLoanDraft, readIdentityDocument, readLoanDraft, writeLoanDraft, type IdentityDocumentMetadata } from './draftStorage';
 import { ALLOWED_FILE_TYPES, MAX_FILE_SIZE, maskAadhaar, maskAadhaarEntry, editAadhaarEntry, extractIdentityFromDocument, lookupIdentityNumber, readIdentityFields, validateIdentity, validateIdentityFile, type IdentityFields, type IdentityField, type IdentityType } from './identity';
 
 function CreditScoreRating({ score }: { score: number }) {
@@ -100,6 +100,7 @@ type LocalDraftSnapshot = {
   identityPanNumber: string;
   identityConsent: boolean;
   identityFetched: IdentityFields;
+  identityDocument?: IdentityDocumentMetadata | null;
   creditMode: 'MANUAL' | 'ONLINE';
   manualCreditScore: string;
   creditScore: number | null;
@@ -151,6 +152,23 @@ const initialApplicant: Applicant = {
   state: '',
   pincode: '',
   additionalDetails: { nationality: '', residentialStatus: '', maritalStatus: '', gender: '', fatherName: '', motherName: '', spouseName: '', education: '', alternateMobile: '', aadhaarNumber: '', alternateIdType: '', alternateIdNumber: '', currentResidenceType: '', yearsAtAddress: '', monthlyRent: '', permanentAddress: '', sameAsCurrentAddress: 'true', addressProofType: '', accountHolderName: '', accountNumber: '', ifscCode: '', bankName: '', bankBranch: '', accountType: '', salaryAccount: '', coApplicantName: '', coApplicantRelationship: '', coApplicantType: '', coApplicantPan: '', coApplicantMobile: '', coApplicantEmail: '', coApplicantAddress: '', guarantorName: '', guarantorRelationship: '', guarantorPan: '', guarantorMobile: '', guarantorEmail: '', guarantorAddress: '', guarantorConsent: 'false' }
+};
+
+const restoreDocumentFields = (saved: Partial<Applicant>, fields: IdentityFields): Applicant => {
+  const restored = { ...initialApplicant, ...saved, additionalDetails: { ...initialApplicant.additionalDetails, ...saved.additionalDetails } };
+  for (const key of Object.keys(initialApplicant)) {
+    if (key !== 'additionalDetails' && Reflect.get(saved, key) == null) {
+      Object.assign(restored, { [key]: Reflect.get(initialApplicant, key) });
+    }
+  }
+  for (const [key, value] of Object.entries(fields)) {
+    if (key === 'panNumber') continue;
+    if (key in initialApplicant) {
+      if (Reflect.get(saved, key) == null) Object.assign(restored, { [key]: value });
+    } else if (saved.additionalDetails?.[key] === undefined) restored.additionalDetails[key] = value;
+  }
+  restored.additionalDetails.age = calculateAge(restored.dateOfBirth);
+  return restored;
 };
 
 const initialEmployment: Employment = {
@@ -349,10 +367,10 @@ function App() {
   const [identityType, setIdentityType] = useState<IdentityType>('');
   const [identityPanNumber, setIdentityPanNumber] = useState('');
   const [identityFile, setIdentityFile] = useState<File | null>(null);
+  const [identityDocument, setIdentityDocument] = useState<IdentityDocumentMetadata | null>(null);
   const [identityConsent, setIdentityConsent] = useState(false);
   const [identityLoading, setIdentityLoading] = useState(false);
   const [identityError, setIdentityError] = useState('');
-  const [identityLookupMatched, setIdentityLookupMatched] = useState(false);
   const [pincodeMessage, setPincodeMessage] = useState('');
   const pincodeCacheRef = useRef(new Map<string, { city: string; state: string }>());
   const [identityFetched, setIdentityFetched] = useState<IdentityFields>({});
@@ -478,10 +496,10 @@ function App() {
     setIdentityType('');
     setIdentityPanNumber('');
     setIdentityFile(null);
+    setIdentityDocument(null);
     setIdentityConsent(false);
     setIdentityLoading(false);
     setIdentityError('');
-    setIdentityLookupMatched(false);
     setIdentityFetched({});
     if (identityFileRef.current) identityFileRef.current.value = '';
   };
@@ -493,19 +511,27 @@ function App() {
       : applicant.additionalDetails?.[key] || '';
   const isIdentityFetched = (key: IdentityField) => Boolean(identityFetched[key] && identityFetched[key] === identityValue(key));
   const identityTag = (key: IdentityField) => isIdentityFetched(key)
-    ? <small className="field-success identity-source-tag">Filled from identity document / test record</small> : null;
+    ? <small className="field-success identity-source-tag">Filled from identity document - please review</small> : null;
   const identityFilledCount = (Object.keys(identityFetched) as IdentityField[]).filter(isIdentityFetched).length;
   const identityNumber = identityType === 'PAN' ? identityPanNumber : applicant.additionalDetails?.aadhaarNumber || '';
   const identityNumberFormatValid = Boolean(identityType && identityNumber
     && !validateIdentity(identityType, identityNumber, null, true));
 
   const clearIdentityApplicant = (previous: Applicant) => {
-    const additionalDetails: Record<string, string> = { ...previous.additionalDetails, aadhaarNumber: '', age: '' };
-    const next = { ...previous, fullName: '', dateOfBirth: '', panNumber: '', additionalDetails };
+    const additionalDetails: Record<string, string> = { ...previous.additionalDetails };
+    const next = { ...previous, additionalDetails };
     for (const key of Object.keys(identityFetched) as IdentityField[]) {
+      if (key === 'panNumber') continue;
+      const current = key in initialApplicant ? previous[key as keyof Applicant] : additionalDetails[key];
+      if (current !== identityFetched[key]) continue;
       if (key in initialApplicant) Object.assign(next, { [key]: '' });
       else next.additionalDetails[key] = '';
+      if (key === 'dateOfBirth') next.additionalDetails.age = '';
     }
+    delete next.additionalDetails.identityFetchedFields;
+    delete next.additionalDetails.identityDocument;
+    delete next.additionalDetails.identityDocumentType;
+    delete next.additionalDetails.identityConsent;
     return next;
   };
 
@@ -514,13 +540,11 @@ function App() {
     identityRequestRef.current = null;
     setIdentityLoading(false);
     setApplicant(clearIdentityApplicant);
-    setIdentityPanNumber('');
     setIdentityFile(null);
+    setIdentityDocument(null);
     setIdentityConsent(false);
     setIdentityError('');
-    setIdentityLookupMatched(false);
     setIdentityFetched({});
-    setValidationMessage('');
     if (identityFileRef.current) identityFileRef.current.value = '';
   };
 
@@ -534,12 +558,20 @@ function App() {
     }
     const error = validateIdentityFile(selectedFiles[0]);
     if (error) setIdentityError(error);
-    else setIdentityFile(selectedFiles[0]);
+    else {
+      const file = selectedFiles[0];
+      setIdentityFile(file);
+      setIdentityDocument({ fileName: file.name, fileSize: file.size, fileType: file.type, uploadedAt: Date.now(), fetchedFields: {} });
+    }
     if (identityFileRef.current) identityFileRef.current.value = '';
   };
 
   const fetchIdentity = async () => {
     if (identityRequestRef.current) return;
+    if (identityDocument && !identityFile) {
+      setIdentityError('Your saved document details are restored. To run extraction again, upload the original document again.');
+      return;
+    }
     const number = identityType === 'PAN' ? identityPanNumber : applicant.additionalDetails?.aadhaarNumber || '';
     const error = validateIdentity(identityType, number, identityFile, identityConsent);
     setIdentityError(error);
@@ -547,10 +579,14 @@ function App() {
     const controller = new AbortController();
     identityRequestRef.current = controller;
     setIdentityLoading(true);
-    setIdentityLookupMatched(false);
     setIdentityFetched({});
+    if (identityFile) setIdentityDocument(previous => previous ? { ...previous, fetchedFields: {} } : null);
     setApplicant(previous => {
       const next = clearIdentityApplicant(previous);
+      if (identityFile) {
+        next.dateOfBirth = '';
+        next.additionalDetails.age = '';
+      }
       if (!identityFile && identityType === 'AADHAAR') next.additionalDetails.aadhaarNumber = number;
       return next;
     });
@@ -567,11 +603,11 @@ function App() {
         fields = lookupIdentityNumber(identityType, number);
       }
       if (controller.signal.aborted) return;
-      if (!identityFile) setIdentityLookupMatched(Boolean(fields.fullName));
       setApplicant(previous => {
         const next = clearIdentityApplicant(previous);
-        next.additionalDetails.age = calculateAge(fields.dateOfBirth || '');
+        if (fields.dateOfBirth) next.additionalDetails.age = calculateAge(fields.dateOfBirth);
         for (const [key, value] of Object.entries(fields)) {
+          if (key === 'panNumber' && previous.panNumber) continue;
           if (key in initialApplicant && key !== 'additionalDetails') {
             Object.assign(next, { [key]: value });
           } else {
@@ -585,12 +621,13 @@ function App() {
         }
         return next;
       });
-      setIdentityPanNumber(identityType === 'PAN' ? fields.panNumber || '' : '');
+      if (identityType === 'PAN' && fields.panNumber) setIdentityPanNumber(previous => previous || fields.panNumber || '');
       setIdentityFetched(fields);
+      if (identityFile) setIdentityDocument(previous => previous ? { ...previous, fetchedFields: fields } : null);
       if (identityFile && (!fields.fullName || !fields.dateOfBirth)) {
         setIdentityError('Some identity details could not be read clearly. Please enter or review the name and date of birth manually.');
       } else if (!identityFile && !fields.fullName) {
-        setIdentityError('No configured test identity record matches this number. Please enter the applicant details manually or upload the document.');
+        setIdentityError('Number format validation cannot retrieve personal details. Upload your document or enter your details manually.');
       }
     } catch (error) {
       if (timedOut && identityRequestRef.current === controller) {
@@ -605,6 +642,23 @@ function App() {
         identityRequestRef.current = null;
         setIdentityLoading(false);
       }
+    }
+  };
+
+  const restoreIdentityDocument = (value: unknown, fallbackFields: IdentityFields = {}) => {
+    try {
+      const document = readIdentityDocument(value);
+      const savedFields = document && Object.keys(document.fetchedFields).length ? document.fetchedFields : fallbackFields;
+      const fields = Object.keys(savedFields).length ? readIdentityFields({ fields: savedFields }) : {};
+      const restored = document ? { ...document, fetchedFields: fields } : null;
+      setIdentityDocument(restored);
+      setIdentityFetched(fields);
+      return fields;
+    } catch (error) {
+      setIdentityDocument(null);
+      setIdentityFetched({});
+      setIdentityError(error instanceof Error ? error.message : 'Saved identity document details could not be restored. Please upload the document again.');
+      return {};
     }
   };
 
@@ -629,15 +683,15 @@ function App() {
     setApplicationId(draft.applicationId ?? null);
     localDraftIdRef.current = draft.applicationId ? null : draft.localDraftId ?? null;
     setLocalDraftId(localDraftIdRef.current);
-    setApplicant({ ...initialApplicant, ...draft.applicant, mobileNumber: mobile, additionalDetails: { ...initialApplicant.additionalDetails, ...(draft.applicant?.additionalDetails || {}) } });
+    const restoredFields = restoreIdentityDocument(draft.identityDocument ?? draft.applicant?.additionalDetails?.identityDocument, draft.identityFetched);
+    setApplicant(restoreDocumentFields({ ...draft.applicant, mobileNumber: mobile }, restoredFields));
     setApplicantMobileError('');
     setEmployment({ ...initialEmployment, ...draft.employment, additionalDetails: { ...initialEmployment.additionalDetails, ...(draft.employment?.additionalDetails || {}) } });
     setLoanDetails({ ...initialLoanDetails, ...draft.loanDetails, additionalDetails: { ...initialLoanDetails.additionalDetails, ...(draft.loanDetails?.additionalDetails || {}) } });
     if (draft.loanDetails?.loanType) setNewApplicationLoanType(draft.loanDetails.loanType);
     setIdentityType(draft.identityType || '');
-    setIdentityPanNumber(draft.identityPanNumber || '');
+    setIdentityPanNumber(draft.identityPanNumber ?? draft.applicant?.additionalDetails?.identityPanNumber ?? '');
     setIdentityConsent(Boolean(draft.identityConsent));
-    setIdentityFetched(draft.identityFetched || {});
     setCreditMode(draft.creditMode === 'ONLINE' ? 'ONLINE' : 'MANUAL');
     setManualCreditScore(draft.manualCreditScore || '');
     setCreditScore(draft.creditScore ?? null);
@@ -761,6 +815,10 @@ function App() {
       additionalDetails: {
         ...applicant.additionalDetails,
         identityFetchedFields: JSON.stringify(identityFetched),
+        identityDocument: JSON.stringify(identityDocument),
+        identityDocumentType: identityType,
+        identityPanNumber,
+        identityConsent: String(identityConsent),
         ...(session?.role === 'USER' ? { draftCurrentStep: String(currentStep) } : {})
       }
     },
@@ -873,27 +931,24 @@ function App() {
       if (app.loanDetails?.loanType) setNewApplicationLoanType(app.loanDetails.loanType);
       setShowUserDashboard(false);
       setSaveIndicator(app.status === 'DRAFT' ? 'Saved draft' : '');
-      setApplicant({
-        fullName: app.applicant.fullName || '',
-        dateOfBirth: app.applicant.dateOfBirth || '',
-        panNumber: app.applicant.panNumber || '',
-        mobileNumber: app.applicant.mobileNumber || session?.mobile || '',
-        email: app.applicant.email || '',
-        workEmail: app.applicant.workEmail || '',
-        residentialAddress: app.applicant.residentialAddress || '',
-        city: app.applicant.city || '',
-        state: app.applicant.state || '',
-        pincode: app.applicant.pincode || '',
-        additionalDetails: { ...initialApplicant.additionalDetails, ...(app.applicant.additionalDetails || {}) }
-      });
+      let savedFields: IdentityFields = {};
       const savedIdentityFields = app.applicant.additionalDetails?.identityFetchedFields;
       if (savedIdentityFields && savedIdentityFields !== '{}') {
         try {
-          setIdentityFetched(readIdentityFields({ fields: JSON.parse(savedIdentityFields) }));
+          savedFields = readIdentityFields({ fields: JSON.parse(savedIdentityFields) });
         } catch {
           setIdentityError('Saved identity source tags could not be restored. Your applicant details are still available; please review them.');
         }
       }
+      const restoredFields = restoreIdentityDocument(app.applicant.additionalDetails?.identityDocument, savedFields);
+      setApplicant(restoreDocumentFields({
+        ...app.applicant,
+        mobileNumber: app.applicant.mobileNumber || session?.mobile || ''
+      }, restoredFields));
+      const savedIdentityType = app.applicant.additionalDetails?.identityDocumentType;
+      setIdentityType(savedIdentityType === 'AADHAAR' || savedIdentityType === 'PAN' ? savedIdentityType : '');
+      setIdentityConsent(app.applicant.additionalDetails?.identityConsent === 'true');
+      setIdentityPanNumber(app.applicant.additionalDetails?.identityPanNumber ?? (savedIdentityType === 'PAN' ? app.applicant.panNumber || '' : ''));
       setApplicantMobileError(validateMobileNumber(app.applicant.mobileNumber));
       setEmployment({
         employmentType: app.employmentDetails.employmentType,
@@ -1685,7 +1740,7 @@ function App() {
   const persistLocalDraft = () => {
     const mobile = session?.role === 'USER' ? session.mobile : undefined;
     if (!mobile || draftHydratedRef.current !== mobile || showUserDashboard || submittedApplication || !ACTIVE_DRAFT_STATUSES.includes(status)) return;
-    writeLoanDraft<LocalDraftSnapshot>(mobile, {
+    const storageError = writeLoanDraft<LocalDraftSnapshot>(mobile, {
       applicationId,
       localDraftId: localDraftIdRef.current,
       currentStep,
@@ -1697,12 +1752,14 @@ function App() {
       identityPanNumber,
       identityConsent,
       identityFetched,
+      identityDocument,
       creditMode,
       manualCreditScore,
       creditScore
     });
+    if (storageError) setIdentityError(storageError);
   };
-  useEffect(() => { persistLocalDraft(); }, [currentStep, showUserDashboard, applicationId, localDraftId]);
+  useEffect(() => { persistLocalDraft(); }, [currentStep, showUserDashboard, applicationId, localDraftId, applicant, identityType, identityPanNumber, identityConsent, identityFetched, identityDocument]);
 
   const handleGoHome = () => {
     if (autoSaveTimerRef.current !== null) {
@@ -1857,7 +1914,7 @@ function App() {
               }}>
                 <label>Upload Aadhaar / PAN document<input ref={identityFileRef} type="file" accept=".pdf,.jpg,.jpeg,.png" disabled={identityLoading} onChange={event => chooseIdentityFile(event.target.files)} /></label>
                 <small className="field-hint">Accepted file types: PDF, JPG, PNG. Maximum file size: 5 MB. Drag and drop one document here.</small>
-                {identityFile && <div><span>{identityFile.name} ({(identityFile.size / 1024).toFixed(1)} KB)</span> <button type="button" className="secondary" onClick={clearIdentityDetails}>Remove document</button></div>}
+                {identityDocument && <div><span>Document selected: {identityDocument.fileName} ({(identityDocument.fileSize / 1024).toFixed(1)} KB)</span> <button type="button" className="secondary" onClick={clearIdentityDetails}>Remove document</button>{!identityFile && <small className="field-hint">Saved document metadata and extracted details restored. Upload the original file again only if you need to repeat extraction.</small>}</div>}
               </div>
               <label className="full-width identity-consent"><input type="checkbox" checked={identityConsent} disabled={identityLoading} onChange={event => setIdentityConsent(event.target.checked)} />I explicitly consent to using my selected Aadhaar/PAN number or document to fetch and pre-fill my identity details.</label>
             </div>
@@ -1865,8 +1922,7 @@ function App() {
             {identityLoading && <p className="field-hint" role="status">Extracting identity details. You can continue entering applicant details below.</p>}
             {identityError && <div className="validation-box" role="alert">{identityError}</div>}
             {identityNumberFormatValid && <p className="field-success" role="status">Number format valid</p>}
-            {identityLookupMatched && <p className="field-hint" role="status">Matched a configured test identity record, not a government-verified Aadhaar/PAN lookup. Please review the details.</p>}
-            {identityNumberFormatValid && !identityFile && !identityLookupMatched && <p className="field-hint">Number format validation does not verify identity. If no test record matches, enter the applicant's real name and date of birth below.</p>}
+            {identityNumberFormatValid && !identityDocument && <p className="field-hint">Number format validation does not verify identity. Upload the document or enter the applicant's real details below.</p>}
             {identityFilledCount > 0 && <p className="field-success" role="status">{identityFilledCount} fields filled &ndash; please review</p>}
           </fieldset>
           <div className="field-grid">

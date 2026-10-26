@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { MAX_FILE_SIZE, isValidAadhaar, maskAadhaar, maskAadhaarEntry, editAadhaarEntry, parseIdentityText, readIdentityFields, validateIdentity, validateIdentityFile } from '../src/identity.ts';
+import { MAX_FILE_SIZE, MIN_IDENTITY_OCR_CONFIDENCE, confidentIdentityText, lookupIdentityNumber, resolveIdentityExtraction, isValidAadhaar, maskAadhaar, maskAadhaarEntry, editAadhaarEntry, parseIdentityText, readIdentityFields, validateIdentity, validateIdentityFile } from '../src/identity.ts';
 
 const pdf = new File(['%PDF-1.4'], 'identity.pdf', { type: 'application/pdf' });
 
@@ -163,8 +163,53 @@ test('extracts Aadhaar father names from labels and standalone relation lines', 
     assert.equal(fields.gender, 'Female');
     assert.equal(readIdentityFields({ fields }).fatherName, 'Anil Verma');
   }
-  for (const line of ['W/O: Anil Verma', 'C/O: Anil Verma']) {
-    assert.equal(parseIdentityText(front + line, 'AADHAAR').fatherName, undefined);
+  for (const line of ['W/O: Anil Verma', 'C/O: Anil Verma', 'Care of: Anil Verma']) {
+    assert.equal(parseIdentityText(front + line, 'AADHAAR').fatherName, 'Anil Verma');
+  }
+});
+
+test('extracts distinct uploaded identities from To and care-of layouts without using lookup records', () => {
+  for (const [name, parent, dob] of [
+    ['Nisha Desai', 'Vijay Desai', '14/08/1987'],
+    ['Dev Kapoor', 'Ramesh Kapoor', '26-03-1994']
+  ]) {
+    const text = `GOVERNMENT OF INDIA\nTo\n${name}\nC / O:\n${parent}\n18 River Street\nPune Maharashtra 411001\nDOB: ${dob}\nXXXX XXXX 6789`;
+    const fields = parseIdentityText(text, 'AADHAAR');
+    assert.equal(fields.fullName, name);
+    assert.equal(fields.fatherName, parent);
+    assert.equal(fields.dateOfBirth, dob.slice(6) + '-' + dob.slice(3, 5) + '-' + dob.slice(0, 2));
+    assert.equal(fields.aadhaarNumber, 'XXXXXXXX6789');
+    assert.equal(fields.residentialAddress, '18 River Street, Pune Maharashtra 411001');
+    assert.equal(fields.pincode, '411001');
+  }
+});
+
+test('does not invent personal details from a number or low-confidence OCR', () => {
+  assert.deepEqual(lookupIdentityNumber('PAN', 'BNZPM2501F'), { panNumber: 'BNZPM2501F' });
+  assert.deepEqual(lookupIdentityNumber('AADHAAR', '499118665246'), { aadhaarNumber: 'XXXXXXXX5246' });
+  const text = 'Name: Nisha Desai\nDOB: 14/08/1987';
+  for (const confidence of [NaN, 0, MIN_IDENTITY_OCR_CONFIDENCE - 1]) {
+    assert.equal(confidentIdentityText(text, confidence), '');
+    assert.throws(() => resolveIdentityExtraction(confidentIdentityText(text, confidence), 'PAN'), /could not read/);
+  }
+  assert.equal(confidentIdentityText(text, MIN_IDENTITY_OCR_CONFIDENCE), text);
+  assert.equal(parseIdentityText("Name\n[unreadable]\nFather's Name\nVijay Desai\nDOB: 14/08/1987", 'PAN').fullName, undefined);
+});
+
+test('DOB comes only from the current document in day-first or ISO formats', () => {
+  for (const [date, expected] of [
+    ['09/04/1986', '1986-04-09'], ['21-12-1998', '1998-12-21'], ['1979-06-18', '1979-06-18']
+  ]) {
+    assert.equal(resolveIdentityExtraction(`Name: Meera Joshi\nDOB: ${date}`, 'PAN').dateOfBirth, expected);
+  }
+  for (const text of [
+    'Name: Meera Joshi',
+    'Name: Meera Joshi\nIssue Date: 01/01/2020',
+    'Name: Meera Joshi\nDOB: unreadable\n01/01/2020',
+    'Name: Meera Joshi\nDOB: 31/02/1990\nIssue Date: 01/01/2020',
+    'Name: Meera Joshi\n01/01/1990\n02/02/1991'
+  ]) {
+    assert.equal(resolveIdentityExtraction(text, 'PAN').dateOfBirth, undefined, text);
   }
 });
 
