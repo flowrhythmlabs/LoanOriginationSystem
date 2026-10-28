@@ -6,7 +6,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.UUID;
 
 @Service
@@ -67,5 +70,21 @@ public class MockSignzyKycProvider implements KycProvider {
 
         log.info("Mock KYC completed for applicationId={} with status={}", request.getApplicationId(), verification.getStatus());
         return verification;
+    }
+    @Override
+    public Map<String, String> fetchIdentityDetails(String documentType, String number, MultipartFile file) {
+        Map<String, String> fields = new LinkedHashMap<>();
+        fields.put("fullName", "Rahul Sharma");
+        fields.put("dateOfBirth", "1995-05-15");
+        fields.put("gender", "Male");
+        fields.put("fatherName", "Suresh Sharma");
+        fields.put("residentialAddress", "123 Main Street, Varanasi, UP, 221006");
+        fields.put("panNumber", "ABCDE1234F");
+        if ("AADHAAR".equals(documentType)) {
+            fields.put("aadhaarNumber", number != null && number.matches("[2-9][0-9]{11}")
+                    ? "XXXXXXXX" + number.substring(8) : "XXXXXXXX9012");
+        }
+        log.info("Mock identity extraction returned demo details for documentType={}", documentType);
+        return fields;
     }
 }

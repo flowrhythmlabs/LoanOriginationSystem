@@ -525,6 +525,7 @@ public class LoanApplicationService {
         MockCreditBureauService.CreditScoreResponse response = mockCreditBureauService.evaluate(pan);
 
         CreditCheck creditCheck = new CreditCheck();
+        creditCheck.setScoreSource("BUREAU_API");
         creditCheck.setCreditScore(response.getCreditScore());
         creditCheck.setBureau(response.getBureau());
         creditCheck.setStatus(response.getStatus());
@@ -539,11 +540,6 @@ public class LoanApplicationService {
         LoanApplication application = getById(applicationId);
         validateCompleteApplication(application);
         var extraApplicant = application.getApplicant().getAdditionalDetails();
-        if (extraApplicant != null && "true".equalsIgnoreCase(extraApplicant.get("coApplicantRequired"))
-                && extraApplicant.get("coApplicantName") != null && !extraApplicant.get("coApplicantName").isBlank()
-                && !"true".equalsIgnoreCase(extraApplicant.get("coApplicantConsent"))) {
-            throw new IllegalArgumentException("Separate KYC and bureau consent is required for the co-applicant.");
-        }
         if (extraApplicant != null && extraApplicant.get("guarantorName") != null && !extraApplicant.get("guarantorName").isBlank()
                 && !"true".equalsIgnoreCase(extraApplicant.get("guarantorConsent"))) {
             throw new IllegalArgumentException("Separate KYC and bureau consent is required for the guarantor.");
@@ -567,6 +563,14 @@ public class LoanApplicationService {
             if (score < 300 || score > 900) {
                 throw new IllegalArgumentException("Enter a valid self-reported credit score between 300 and 900.");
             }
+            CreditCheck manualCheck = application.getCreditCheck();
+            if (manualCheck == null) manualCheck = new CreditCheck();
+            manualCheck.setCreditScore(score);
+            manualCheck.setScoreSource("MANUAL");
+            manualCheck.setBureau("SELF_REPORTED");
+            manualCheck.setStatus("UNVERIFIED");
+            manualCheck.setRemarks("Applicant-entered score; not independently bureau verified");
+            application.setCreditCheck(manualCheck);
         } else if ("ONLINE".equalsIgnoreCase(creditMode)) {
         if (application.getCreditCheck() == null) {
                 throw new IllegalArgumentException("Complete the online bureau credit check before submission.");
@@ -696,12 +700,12 @@ public class LoanApplicationService {
                 Document.DocumentType.ADDRESS_PROOF));
         if (employmentType == EmploymentDetails.EmploymentType.SALARIED) {
             required.addAll(Set.of(Document.DocumentType.SALARY_SLIPS, Document.DocumentType.EMPLOYMENT_PROOF,
-                    Document.DocumentType.FORM_16, Document.DocumentType.ITR));
+                    Document.DocumentType.FORM_16));
         } else if (employmentType == EmploymentDetails.EmploymentType.SELF_EMPLOYED) {
-            required.addAll(Set.of(Document.DocumentType.ITR, Document.DocumentType.BUSINESS_PROOF,
+            required.addAll(Set.of(Document.DocumentType.BUSINESS_PROOF,
                     Document.DocumentType.QUALIFICATION_PROOF));
         } else if (employmentType == EmploymentDetails.EmploymentType.BUSINESS_OWNER) {
-            required.addAll(Set.of(Document.DocumentType.ITR, Document.DocumentType.BUSINESS_PROOF,
+            required.addAll(Set.of(Document.DocumentType.BUSINESS_PROOF,
                     Document.DocumentType.GST_DOCUMENT, Document.DocumentType.BUSINESS_FINANCIALS));
         }
         var extraApplicant = application.getApplicant() == null ? null : application.getApplicant().getAdditionalDetails();

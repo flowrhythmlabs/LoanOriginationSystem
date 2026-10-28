@@ -1,0 +1,33 @@
+import {useEffect,useState} from 'react';
+import {buildAuthHeaders,type AuthSession} from './auth';
+type Obj=Record<string,unknown>;
+
+const label=(s:string)=>s.replaceAll('_',' ').toLowerCase().replace(/\b\w/g,c=>c.toUpperCase());
+export function StaffAdminPortal({session}:{session:AuthSession}) {
+  const [settingReason,setSettingReason]=useState(''),[settingBusy,setSettingBusy]=useState(false);
+  const [users,setUsers]=useState<Obj[]>([]),[settings,setSettings]=useState<Obj|null>(null);
+  const [selected,setSelected]=useState<number|null>(null),[enabled,setEnabled]=useState(true),[roles,setRoles]=useState<string[]>([]);
+  const [reason,setReason]=useState(''),[message,setMessage]=useState(''),[error,setError]=useState(''),[busy,setBusy]=useState(false);
+  const request=async(path:string,init:RequestInit={})=>{
+    const headers=buildAuthHeaders(session);if(init.body)headers.set('Content-Type','application/json');
+    const r=await fetch(path,{...init,headers});const data=await r.json().catch(()=>({}));if(!r.ok)throw new Error(data.message||`HTTP ${r.status}`);return data;
+  };
+  const reload=async()=>{const [a,b]=await Promise.all([request('/api/staff/administration/users'),request('/api/staff/administration/settings')]);setUsers(a);setSettings(b);};
+  useEffect(()=>{void reload().catch(e=>setError(String(e)));},[]);
+  const updateDemo=async(value:boolean)=>{if(!settingReason.trim())return;setSettingBusy(true);setError('');try{await request('/api/staff/administration/settings/DEMO_APPROVAL_ENABLED',{method:'PATCH',body:JSON.stringify({value:String(value),reason:settingReason})});await reload();setSettingReason('');setMessage('Demo approval setting updated.');}catch(e){setError(String(e));}finally{setSettingBusy(false);}};
+  const roleOptions=Array.isArray(settings?.availableRoles)?settings.availableRoles.map(String):[];
+  const demoRow=Array.isArray(settings?.runtimeSettings)?(settings.runtimeSettings as Obj[]).find(r=>r.setting_key==='DEMO_APPROVAL_ENABLED'):undefined;
+  const edit=(u:Obj)=>{setSelected(Number(u.id));setEnabled(Boolean(u.enabled));setRoles(typeof u.roles==='string'&&u.roles?u.roles.split(','):[]);setReason('');setMessage('');setError('');};
+  const save=async()=>{if(selected===null||!reason.trim())return;setBusy(true);setError('');setMessage('');try{await request(`/api/staff/administration/users/${selected}`,{method:'PATCH',body:JSON.stringify({enabled,roles,reason})});await reload();setSelected(null);setMessage('Staff account updated.');}catch(e){setError(String(e));}finally{setBusy(false);}};
+  return <section className="card form-card"><h2>System Administration</h2><p>Manage staff access and review system security settings. Loan approval and product pricing are managed through separate maker-checker workflows.</p>
+    {error&&<p role="alert" style={{color:'#b91c1c',fontWeight:700}}>{error}</p>}{message&&<p role="status" style={{color:'#166534'}}>{message}</p>}
+    <h3>Staff users and roles</h3><button type="button" className="secondary" onClick={()=>void reload().catch(e=>setError(String(e)))}>Refresh users</button>
+    <div style={{overflowX:'auto'}}><table><thead><tr><th>Username</th><th>Display name</th><th>Roles</th><th>Status</th><th>Action</th></tr></thead><tbody>{users.map(u=><tr key={Number(u.id)}><td>{String(u.username)}</td><td>{String(u.display_name||'—')}</td><td>{(typeof u.roles==='string'&&u.roles?u.roles.split(','):[]).map(label).join(', ')}</td><td>{u.enabled?'Enabled':'Disabled'}</td><td><button className="secondary" type="button" onClick={()=>edit(u)}>Manage</button></td></tr>)}</tbody></table></div>
+    {selected!==null&&<div style={{border:'1px solid #cbd5e1',padding:16,borderRadius:8}}><h3>Update staff account</h3><label><input type="checkbox" checked={enabled} onChange={e=>setEnabled(e.target.checked)}/> Account enabled</label><p>Assigned roles</p><div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(210px,1fr))',gap:8}}>{roleOptions.map(r=><label key={r}><input type="checkbox" checked={roles.includes(r)} onChange={e=>setRoles(prev=>e.target.checked?[...prev,r]:prev.filter(x=>x!==r))}/> {label(r)}</label>)}</div><label>Change reason *<input value={reason} onChange={e=>setReason(e.target.value)} maxLength={80}/></label><div className="inline-actions"><button className="primary" disabled={busy||!reason.trim()||roles.length===0} onClick={()=>void save()}>Save staff permissions</button><button className="secondary" onClick={()=>setSelected(null)}>Cancel</button></div></div>}
+    <h3>System settings</h3><p>Staff MFA: {settings?.staffMfaRequired?'Required':'—'} · Maker-checker: {settings?.makerCheckerRequired?'Required':'—'}</p><p>{String(settings?.message||'Settings unavailable.')}</p>
+    <p><strong>Simulated loan approval:</strong> {String(demoRow?.setting_value)==='true'?'Enabled in database':'Disabled in database'} · Deployment permits simulation: {settings?.environmentAllowsDemo?'Yes':'No'}</p>
+    <label>Reason for change *<input value={settingReason} onChange={e=>setSettingReason(e.target.value)} maxLength={80}/></label>
+    <div className="inline-actions"><button type="button" disabled={settingBusy||!settingReason.trim()} onClick={()=>void updateDemo(true)}>Enable demo approval</button><button type="button" disabled={settingBusy||!settingReason.trim()} onClick={()=>void updateDemo(false)}>Disable demo approval</button></div>
+    <p style={{fontSize:13}}>Roles and business settings are read from PostgreSQL. Credentials, live lending activation and environment safety remain outside the database.</p>
+  </section>;
+}

@@ -36,3 +36,6 @@ finedge:
       mode: ${MESSAGING_MODE:disabled}
       base-url: ${MESSAGING_BASE_URL:}
       api-key: ${MESSAGING_API_KEY:}
+app:
+  auth:
+    demo-otp-enabled: ${LOS_DEMO_OTP_ENABLED:true}

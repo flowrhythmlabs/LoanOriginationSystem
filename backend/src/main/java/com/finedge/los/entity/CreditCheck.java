@@ -22,6 +22,8 @@ public class CreditCheck {
     @Column(nullable = true)
     private String remarks;
 
+    @Column(name = "score_source", nullable = false)
+    private String scoreSource = "MANUAL";
     @OneToOne(mappedBy = "creditCheck")
     @JsonIgnore
     private LoanApplication loanApplication;
@@ -53,6 +55,8 @@ public class CreditCheck {
     public void setBureau(String bureau) { this.bureau = bureau; }
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }
+    public String getScoreSource() { return scoreSource; }
+    public void setScoreSource(String scoreSource) { this.scoreSource = scoreSource; }
     public String getRemarks() { return remarks; }
     public void setRemarks(String remarks) { this.remarks = remarks; }
     public LoanApplication getLoanApplication() { return loanApplication; }

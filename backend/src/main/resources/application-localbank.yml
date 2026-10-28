@@ -1,0 +1,31 @@
+# Local-only bank workflow simulator. Never use for real sanctions or funds.
+# Start with --spring.profiles.active=demo,localbank
+finedge:
+  demo:
+    enabled: true
+  lending:
+    live-approval-enabled: false
+    live-disbursement-enabled: false
+  integrations:
+    bureau:
+      mode: mock
+    kyc:
+      mode: mock
+    bank:
+      mode: mock
+    esign:
+      mode: mock
+    mandate:
+      mode: mock
+    disbursement:
+      mode: mock
+    lms:
+      mode: mock
+    messaging:
+      mode: mock
+app:
+  auth:
+    demo-otp-enabled: true
+mock:
+  kyc:
+    mode: SUCCESS
