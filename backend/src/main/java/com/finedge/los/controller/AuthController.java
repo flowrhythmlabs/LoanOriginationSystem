@@ -56,7 +56,7 @@ public class AuthController {
         }
         String otp = otpRequest.code();
         long providerStartedAt = System.nanoTime();
-        if (sessions.isDemoOtpEnabled()==false) response.put("demoOtp", otp);
+        if (sessions.isDemoOtpEnabled()) response.put("demoOtp", otp);
         else {
             try {
                 SmsOtpSender.SendResult result = smsSender.send(mobile, otp);
