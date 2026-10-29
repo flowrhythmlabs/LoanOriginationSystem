@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { clearAuth, persistAuth, readStoredAuth, type AuthSession } from './auth';
+import type { PublicBranding } from './branding';
 
 const initialMode = window.location.pathname.startsWith('/staff') ? 'admin' : 'user';
 const demoMode = import.meta.env.VITE_DEMO_MODE === 'true';
@@ -24,7 +25,7 @@ type AdminLoginState = {
   authError: string;
 };
 
-export function LoginPage({ onAuthenticated }: { onAuthenticated: (session: AuthSession) => void }) {
+export function LoginPage({ branding, onAuthenticated }: { branding: PublicBranding; onAuthenticated: (session: AuthSession) => void }) {
   const [mode] = useState<LoginMode>(initialMode);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showAdminPassword, setShowAdminPassword] = useState(false);
@@ -262,7 +263,7 @@ export function LoginPage({ onAuthenticated }: { onAuthenticated: (session: Auth
       <div className="auth-glow auth-glow-left" />
       <div className="auth-glow auth-glow-right" />
       <aside className="auth-design-panel">
-        <div className="design-brand-row"><div className="design-brand-mark"><svg viewBox="0 0 48 48" aria-hidden="true"><path d="M6 18 30 3v10L16 22v21L6 37Z" fill="#1470b8"/><path d="m20 27 22-13v11L20 39Z" fill="#5ac8c5"/></svg></div><div><div className="design-brand">FinEdge NBFC</div><div className="design-tagline">Your Growth. Our Support.</div></div></div>
+        <div className="design-brand-row"><div className="design-brand-mark"><svg viewBox="0 0 48 48" aria-hidden="true"><path d="M6 18 30 3v10L16 22v21L6 37Z" fill="#1470b8"/><path d="m20 27 22-13v11L20 39Z" fill="#5ac8c5"/></svg></div><div><div className="design-brand">{branding.institutionName}</div><div className="design-tagline">{branding.tagline}</div></div></div>
         <h1>Your Dreams<br/>Our Priority</h1>
         <p>Quick, simple and secure loan solutions for a better tomorrow.</p>
         <div className="design-feature"><span>ϟ</span><div><strong>Fast Processing</strong><small>Get decisions in minutes</small></div></div>

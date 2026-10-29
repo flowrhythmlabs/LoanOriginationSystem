@@ -10,6 +10,7 @@ import { canUseLocalCreditFallback, creditServiceError, CreditServiceUnavailable
 import { buildAuthHeaders, clearAuth, readStoredAuth, type AuthSession } from './auth';
 import { clearLoanDraft, readLoanDraft, writeLoanDraft } from './draftStorage';
 import { ALLOWED_FILE_TYPES, MAX_FILE_SIZE, maskAadhaar, maskAadhaarEntry, editAadhaarEntry, extractIdentityFromDocument, readIdentityFields, validateIdentity, validateIdentityFile, type IdentityFields, type IdentityField, type IdentityType } from './identity';
+import { DEFAULT_BRANDING, loadBranding, type PublicBranding } from './branding';
 function CreditScoreRating({ score }: { score: number }) {
   const rating = score >= 750 ? 'Excellent' : score >= 700 ? 'Good' : score >= 650 ? 'Fair' : 'Poor';
   return <span className={`credit-score-rating credit-score-rating--${rating.toLowerCase()}`}>{rating}</span>;
@@ -283,6 +284,17 @@ const statusColors: Record<string, string> = {
 
 function App() {
   const [session, setSession] = useState<AuthSession | null>(() => readStoredAuth());
+  const [branding, setBranding] = useState<PublicBranding>(DEFAULT_BRANDING);
+  useEffect(() => {
+    let active = true;
+    void loadBranding().then(config => {
+      if (active) setBranding(config);
+    });
+    return () => { active = false; };
+  }, []);
+  useEffect(() => {
+    document.title = branding.applicationName;
+  }, [branding.applicationName]);
   const [applicant, setApplicant] = useState<Applicant>(initialApplicant);
   const [identityType, setIdentityType] = useState<IdentityType>('');
   const [identityPanNumber, setIdentityPanNumber] = useState('');
@@ -1687,15 +1699,15 @@ function App() {
   };
 
   if (!session) {
-    return <LoginPage onAuthenticated={setSession} />;
+    return <LoginPage branding={branding} onAuthenticated={setSession} />;
   }
 
   return (
     <div className="app-shell">
       <header className="topbar">
         <div>
-          <div className="brand">FinEdge Bank</div>
-          <div className="subtitle">Loan Origination System</div>
+          <div className="brand">{branding.shortName}</div>
+          <div className="subtitle">{branding.applicationName}</div>
         </div>
         <nav className="nav">
           {session.role === 'ADMIN' ? (
