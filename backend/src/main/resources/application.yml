@@ -5,10 +5,10 @@ server:
 
 los:
   branding:
-    institution-name: ${LOS_INSTITUTION_NAME:DarshanBarter}
-    short-name: ${LOS_SHORT_NAME:DarshanBarter}
+    institution-name: ${LOS_INSTITUTION_NAME:Meghna Saree}
+    short-name: ${LOS_SHORT_NAME:Meghna Saree}
     tagline: ${LOS_TAGLINE:Your Growth. Our Support.}
-    application-name: ${LOS_APPLICATION_NAME:DarshanBarter Loan Origination System}
+    application-name: ${LOS_APPLICATION_NAME:Meghna Saree Loan Origination System}
   url:
     # This is the public/canonical browser URL, not a DNS or server bind setting.
     public-base-url: ${LOS_PUBLIC_BASE_URL:http://localhost:5173}
@@ -17,8 +17,12 @@ spring:
   datasource:
     url: ${DB_URL:jdbc:postgresql://localhost:5432/finedge}
     driver-class-name: ${DB_DRIVER_CLASS_NAME:org.postgresql.Driver}
-    username: ${DB_USERNAME:finedge}
-    password: ${DB_PASSWORD:postgres}
+    #production db credentials
+    username: ${DB_USERNAME:finedge_user}
+    password: ${DB_PASSWORD:finedge123}
+    #uncomment for local db
+    #username: ${DB_USERNAME:finedge}
+    #password: ${DB_PASSWORD:postgres}
   h2:
     console:
       enabled: ${H2_CONSOLE_ENABLED:false}
