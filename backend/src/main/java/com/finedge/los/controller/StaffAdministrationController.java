@@ -69,11 +69,11 @@ public class StaffAdministrationController {
     @PostMapping("/users")
     @Transactional
     public ResponseEntity<?> create(@RequestBody AccountCreate input, Authentication auth) {
-        if(input==null || input.username()==null || !input.username().matches("[A-Za-z0-9._-]{3,100}")
+        if(input==null || input.username()==null || !input.username().matches("^[a-zA-ZÀ-ÿ][a-zA-ZÀ-ÿ '.-]*[a-zA-ZÀ-ÿ]$")
           || input.displayName()==null || input.displayName().isBlank() || input.displayName().length()>150
-          || input.password()==null || input.password().length()<12 || input.password().length()>128
+          || input.password()==null || input.password().length()<5 || input.password().length()>128
           || !validRoles(input.roles()) || input.reason()==null || input.reason().isBlank())
-            return ResponseEntity.badRequest().body(Map.of("message","Valid username, display name, password (12-128 characters), role and audit reason are required"));
+            return ResponseEntity.badRequest().body(Map.of("message","Valid username, display name, password (5-128 characters), role and audit reason are required"));
         Long admin=actor(auth); if(admin==null)return ResponseEntity.status(403).build();
         if(db.queryForObject("SELECT count(*) FROM staff_account WHERE lower(username)=lower(?)",Integer.class,input.username())>0)
             return ResponseEntity.badRequest().body(Map.of("message","Username already exists"));
@@ -81,7 +81,7 @@ public class StaffAdministrationController {
             input.username(),input.displayName().trim(),passwordEncoder.encode(input.password()));
         for(String role:new HashSet<>(input.roles()))db.update("INSERT INTO staff_account_role(staff_id,role_code) VALUES(?,?)",id,role);
         db.update("INSERT INTO staff_audit_event(staff_id,action,reason_code) VALUES(?,?,?)",admin,"STAFF_ACCOUNT_CREATE",reason(input.reason()));
-        return ResponseEntity.ok(Map.of("message","Staff account created. MFA enrollment is required when enabled.","userId",id));
+        return ResponseEntity.ok(Map.of("message","Staff Account Created. MFA enrollment is required when enabled.","userId",id));
     }
     @DeleteMapping("/users/{id}")
     @Transactional
