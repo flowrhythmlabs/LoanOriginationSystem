@@ -39,6 +39,7 @@ app:
   upload:
     base-dir: ${DOCUMENT_STORAGE_PATH:./data/documents}
   auth:
+    staff-mfa-enabled: ${LOS_STAFF_MFA_ENABLED:true}
     session-minutes: ${LOS_SESSION_MINUTES:60}
     otp-minutes: ${LOS_OTP_MINUTES:5}
     otp-resend-cooldown-seconds: ${LOS_OTP_RESEND_COOLDOWN_SECONDS:30}

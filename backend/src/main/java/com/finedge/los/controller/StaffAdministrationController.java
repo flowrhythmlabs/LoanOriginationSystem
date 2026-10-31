@@ -1,6 +1,7 @@
 package com.finedge.los.controller;
 
 import org.springframework.http.ResponseEntity;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
@@ -14,6 +15,8 @@ import java.util.*;
 @PreAuthorize("hasRole('SUPER_ADMIN')")
 public class StaffAdministrationController {
     private final JdbcTemplate db;
+    @Value("${app.auth.staff-mfa-enabled:true}")
+    private boolean staffMfaEnabled;
 
     private final com.finedge.los.service.StaffRuntimeSettings runtimeSettings;
     public StaffAdministrationController(JdbcTemplate db, com.finedge.los.service.StaffRuntimeSettings runtimeSettings) { this.db=db; this.runtimeSettings=runtimeSettings; }
@@ -29,7 +32,7 @@ public class StaffAdministrationController {
     }
     @GetMapping("/settings")
     public Map<String,Object> settings() {
-        return Map.of("availableRoles",roles(),"makerCheckerRequired",true,"staffMfaRequired",true,
+        return Map.of("availableRoles",roles(),"makerCheckerRequired",true,"staffMfaRequired",staffMfaEnabled,
           "settingsMode","DATABASE_MANAGED","environmentAllowsDemo",runtimeSettings.environmentAllowsDemo(),
           "runtimeSettings",db.queryForList("SELECT setting_key,setting_value,description,updated_at FROM staff_runtime_setting ORDER BY setting_key"),
           "message","Business workflow settings are stored in PostgreSQL. Deployment security gates cannot be overridden from the database.");

@@ -40,6 +40,18 @@ public class StaffIdentityService {
         return challenge;
     }
 
+    public Map<String,Object> completePasswordLogin(String challengeId, AuthSessionService sessions) {
+        Challenge challenge = challenges.remove(challengeId);
+        if (challenge == null || challenge.expires().isBefore(Instant.now()))
+            throw new SecurityException("Sign-in challenge expired. Try again.");
+        return createStaffSession(challenge, sessions);
+    }
+    private Map<String,Object> createStaffSession(Challenge challenge, AuthSessionService sessions) {
+        var roles = db.queryForList("SELECT role_code FROM staff_account_role WHERE staff_id=? ORDER BY role_code", String.class, challenge.staffId());
+        if (roles.isEmpty()) throw new SecurityException("No staff role assigned");
+        String token = sessions.createSession(challenge.username(), roles.get(0), null);
+        return Map.of("accessToken",token,"role",roles.get(0),"roles",roles,"username",challenge.username(),"expiresInMinutes",sessions.getSessionMinutes());
+    }
     public Map<String,Object> mfaStep(String challengeId, String otp, AuthSessionService sessions) {
         Challenge challenge = challenges.get(challengeId);
         if (challenge == null || challenge.expires().isBefore(Instant.now()) || challenge.attempts() >= 5) {
@@ -56,10 +68,7 @@ public class StaffIdentityService {
             throw new SecurityException("Incorrect MFA code. Try again.");
         }
         challenges.remove(challengeId);
-        var roles = db.queryForList("SELECT role_code FROM staff_account_role WHERE staff_id=? ORDER BY role_code", String.class, challenge.staffId());
-        if (roles.isEmpty()) throw new SecurityException("No staff role assigned");
-        String token = sessions.createSession(challenge.username(), roles.get(0), null);
-        return Map.of("accessToken",token,"role",roles.get(0),"roles",roles,"username",challenge.username(),"expiresInMinutes",sessions.getSessionMinutes());
+        return createStaffSession(challenge, sessions);
     }
 
     private static String totp(String base32, long counter) {

@@ -225,7 +225,14 @@ export function LoginPage({ branding, onAuthenticated }: { branding: PublicBrand
         body: JSON.stringify({ username, password: adminState.password })
       });
       const result = await response.json().catch(() => ({}));
-      if (!response.ok || !result.challengeId) throw new Error(result.message || 'Staff sign-in failed.');
+      if (!response.ok) throw new Error(result.message || 'Staff sign-in failed.');
+      if (result.accessToken && result.mfaRequired !== true) {
+        const session: AuthSession = { authenticated: true, role: 'ADMIN', username: result.username || username, accessToken: result.accessToken };
+        persistAuth(session);
+        onAuthenticated(session);
+        return;
+      }
+      if (!result.challengeId || result.mfaRequired !== true) throw new Error(result.message || 'Staff sign-in failed.');
       setStaffChallengeId(result.challengeId);
       setStaffMfaCode('');
       setAdminState(prev => ({ ...prev, password: '', authError: '' }));
