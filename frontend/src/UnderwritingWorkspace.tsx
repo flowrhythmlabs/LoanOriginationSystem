@@ -24,7 +24,7 @@ const reasonsByStage:Record<string,string[]> = {
 const human = (s:string) => s.replaceAll('_',' ').toLowerCase().replace(/\b\w/g,c=>c.toUpperCase());
 function Details({label,value}:{label:string;value:unknown}) { return <table style={{width:'100%',borderCollapse:'collapse',tableLayout:'fixed'}}><tbody><tr><th scope='row' style={{width:'35%',padding:8,textAlign:'left',border:'1px solid #e5e7eb'}}>{label}</th><td style={{padding:8,border:'1px solid #e5e7eb',overflowWrap:'anywhere'}}>{value==null || value===''?'—':String(value)}</td></tr></tbody></table>; }
 function Section({title,data}:{title:string;data:RecordMap|undefined}) {
-  return <section style={{marginTop:18}}><h4>{title}</h4>{data ? Object.entries(data).filter(([key])=>!['additionalDetails'].includes(key)).map(([key,value])=><Details key={key} label={human(key)} value={typeof value==='object' ? JSON.stringify(value) : value}/>) : <p>Not provided</p>}{data?.additionalDetails && <details><summary>Additional details</summary>{Object.entries(data.additionalDetails as RecordMap).map(([k,v])=><Details key={k} label={human(k)} value={v}/>)}</details>}</section>;
+  return <section style={{marginTop:18}}><h4>{title}</h4>{data ? Object.entries(data).filter(([key])=>!['additionalDetails'].includes(key)).map(([key,value])=><Details key={key} label={human(key)} value={typeof value==='object' ? JSON.stringify(value) : value}/>) : <p>Not provided</p>}{data?.additionalDetails != null && <details><summary>Additional details</summary>{Object.entries(data.additionalDetails as RecordMap).map(([k,v])=><Details key={k} label={human(k)} value={v}/>)}</details>}</section>;
 }
 export function UnderwritingWorkspace({session}:{session:AuthSession}) {
   const [stage,setStage]=useState(''); const [queue,setQueue]=useState<Row[]>([]); const [selected,setSelected]=useState<Row|null>(null);
@@ -172,7 +172,7 @@ export function UnderwritingWorkspace({session}:{session:AuthSession}) {
             <label>Beneficiary IFSC<input value={beneficiaryIfsc} onChange={e=>setBeneficiaryIfsc(e.target.value.toUpperCase())} maxLength={11}/></label>
             <label>Disbursal reference<input value={operationRef} onChange={e=>setOperationRef(e.target.value)} maxLength={100}/></label>
           </div>
-          <button type="button" className="primary" disabled={busy||selected.status!=='APPROVED'||(disbursal?.status&&disbursal.status!=='NOT_STARTED')} onClick={()=>void processDisbursal()}>Process Disbursal</button>
+          <button type="button" className="primary" disabled={busy||selected.status!=='APPROVED'||(Boolean(disbursal?.status) && disbursal?.status !== 'NOT_STARTED')} onClick={()=>void processDisbursal()}>Process Disbursal</button>
           <button type="button" className="secondary" disabled={busy} onClick={()=>void loadDisbursal(selected.id)}>Refresh Provider Status</button>
         </section>}
         <h4>Decision timeline</h4>{timeline.length?timeline.map((t,i)=><p key={i}>{human(String(t.action))} — {String(t.reason_code)} by {String(t.actor)} ({String(t.created_at)})</p>):<p>No decisions yet.</p>}
