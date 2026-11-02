@@ -18,11 +18,11 @@ spring:
     url: ${DB_URL:jdbc:postgresql://localhost:5432/finedge}
     driver-class-name: ${DB_DRIVER_CLASS_NAME:org.postgresql.Driver}
     #production db credentials
-   # username: ${DB_USERNAME:finedge_user}
-   # password: ${DB_PASSWORD:finedge123}
+     username: ${DB_USERNAME:finedge_user}
+     password: ${DB_PASSWORD:finedge123}
     #uncomment for local db
-    username: ${DB_USERNAME:finedge}
-    password: ${DB_PASSWORD:postgres}
+    #username: ${DB_USERNAME:finedge}
+    #password: ${DB_PASSWORD:postgres}
   h2:
     console:
       enabled: ${H2_CONSOLE_ENABLED:false}
