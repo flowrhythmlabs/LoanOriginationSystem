@@ -122,8 +122,8 @@ export function UnderwritingWorkspace({session}:{session:AuthSession}) {
     <p>Signed in as: {human(stage||'Staff')}. Applications are routed according to the latest recorded workflow action.</p>
     {message&&<p role={messageType==='error'?'alert':'status'} aria-live={messageType==='error'?'assertive':'polite'} style={{padding:'12px 14px',borderRadius:8,fontWeight:600,background:messageType==='error'?'#fff1f2':'#ecfdf5',border:`1px solid ${messageType==='error'?'#fda4af':'#86efac'}`,color:messageType==='error'?'#b91c1c':'#166534'}}>{message}</p>}
     <button type="button" className="secondary" onClick={()=>void refresh()}>Refresh applications</button>
-    <table><thead><tr><th>Application</th><th>Applicant</th><th>Product</th><th>Amount</th><th>Status</th><th>Previous action</th><th/></tr></thead>
-    <tbody>{queue.length===0?<tr><td colSpan={7}>No applications currently assigned to this stage.</td></tr>:queue.map(r=><tr key={r.id}><td>{r.application_number||`DRAFT-${r.id}`}</td><td>{r.applicant_name||'—'}</td><td>{human(r.loan_type||'—')}</td><td>{r.requested_loan_amount??'—'}</td><td>{human(r.status)}</td><td>{r.last_action?human(r.last_action):'Awaiting processor'}</td><td><button className="secondary" type="button" onClick={()=>void open(r)}>Review full application</button></td></tr>)}</tbody></table>
+    <div className="table-scroll"><table><thead><tr><th>Application</th><th>Applicant</th><th>Product</th><th>Amount</th><th>Status</th><th>Previous action</th><th/></tr></thead>
+    <tbody>{queue.length===0?<tr><td colSpan={7}>No applications currently assigned to this stage.</td></tr>:queue.map(r=><tr key={r.id}><td>{r.application_number||`DRAFT-${r.id}`}</td><td>{r.applicant_name||'—'}</td><td>{human(r.loan_type||'—')}</td><td>{r.requested_loan_amount??'—'}</td><td>{human(r.status)}</td><td>{r.last_action?human(r.last_action):'Awaiting processor'}</td><td><button className="secondary" type="button" onClick={()=>void open(r)}>Review full application</button></td></tr>)}</tbody></table></div>
     {selected&&<section style={{marginTop:24,borderTop:'2px solid #cbd5e1',paddingTop:16}}>
       <button className="secondary" type="button" onClick={()=>{closePreview();setSelected(null);setDetail(null);}}>← Back to applications</button>
       <h3>Full application — {selected.application_number}</h3>
@@ -134,7 +134,7 @@ export function UnderwritingWorkspace({session}:{session:AuthSession}) {
         <Section title="Loan terms" data={app.loanDetails as RecordMap}/>
         <Section title="Credit score (self-reported unless bureau evidence is available)" data={app.creditCheck as RecordMap}/>
         <h4>Uploaded documents</h4><p style={{fontSize:13}}>Select Preview to inspect the original uploaded PDF or image. Preview does not mark the document as verified.</p>
-        <div style={{overflowX:'auto'}}><table><thead><tr><th>Document Type</th><th>Description</th><th>Status</th><th>Preview</th></tr></thead><tbody>
+        <div className="table-scroll"><table><thead><tr><th>Document Type</th><th>Description</th><th>Status</th><th>Preview</th></tr></thead><tbody>
           {documentTypes.map(([type,description])=>{
             const doc=((detail?.documents as RecordMap[])||[]).find(d=>d.document_type===type);
             return <tr key={type}><td>{type}</td><td>{description}</td><td>{String(doc?.status||'NOT_UPLOADED')}</td><td>

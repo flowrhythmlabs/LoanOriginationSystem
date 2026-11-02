@@ -315,6 +315,12 @@ input, select {
 .toolbar input, .toolbar select { min-width: 180px; }
 table { width: 100%; border-collapse: collapse; }
 th, td { padding: 12px 10px; border-bottom: 1px solid #edf2fb; text-align: left; }
+/* Horizontally scrollable wrapper for wide data tables (mobile-friendly): equivalent of
+   Tailwind `w-full overflow-x-auto` on the wrapper, `min-w-[800px]` on the table, and
+   `whitespace-nowrap px-4 py-2` on cells so headers never break into single letters. */
+.table-scroll { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.table-scroll > table { width: 100%; table-layout: auto; min-width: 800px; }
+.table-scroll th, .table-scroll td { white-space: nowrap; padding: 8px 16px; }
 @media (max-width: 980px) {
   .dashboard-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .field-grid { grid-template-columns: 1fr; }

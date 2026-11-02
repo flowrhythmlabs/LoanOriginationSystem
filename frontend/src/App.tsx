@@ -2320,7 +2320,7 @@ function App() {
                 <option value="SUBMITTED">Submitted</option>
               </select>
             </div>
-            <table>
+            <div className="table-scroll"><table>
               <thead>
                 <tr>
                   <th>Application Number</th>
@@ -2355,7 +2355,7 @@ function App() {
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </table></div>
             <div className="inline-actions" style={{justifyContent:'flex-end',marginTop:16}}><button type="button" className="primary" onClick={()=>setShowUnderwriting(true)}>Open Pending Reviews & Validation</button></div>
           </section>
         )}
