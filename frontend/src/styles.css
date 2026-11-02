@@ -315,6 +315,12 @@ input, select {
 .toolbar input, .toolbar select { min-width: 180px; }
 table { width: 100%; border-collapse: collapse; }
 th, td { padding: 12px 10px; border-bottom: 1px solid #edf2fb; text-align: left; }
+/* Horizontally scrollable wrapper for wide data tables (mobile-friendly): equivalent of
+   Tailwind `w-full overflow-x-auto` on the wrapper, `min-w-[800px]` on the table, and
+   `whitespace-nowrap px-4 py-2` on cells so headers never break into single letters. */
+.table-scroll { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.table-scroll > table { width: 100%; table-layout: auto; min-width: 800px; }
+.table-scroll th, .table-scroll td { white-space: nowrap; padding: 8px 16px; }
 @media (max-width: 980px) {
   .dashboard-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .field-grid { grid-template-columns: 1fr; }
@@ -600,3 +606,123 @@ label:has(> .required-asterisk) > .field-success {
 .auth-field.has-error > span:first-child { color:#d32f2f; }
 .auth-field.has-error input { border-color:#d32f2f !important; background:#fff5f5 !important; box-shadow:0 0 0 1px #d32f2f; }
 .auth-field.has-error .terms-error { margin:6px 0 0; }
+
+/* ==================================================================
+   Mobile responsiveness & alignment fixes.
+   All rules below are scoped to <=768px (plus the .table-wrap base,
+   which reproduces the previous inline overflowX:auto style), so the
+   desktop view remains 100% untouched.
+   ================================================================== */
+
+/* Plain horizontal-scroll wrapper for simple data tables (Policy portal).
+   Desktop renders identically to the former inline style={{overflowX:'auto'}}. */
+.table-wrap { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+@media (max-width: 768px) {
+  /* --- Global: no horizontal shake/overflow of the page body. --- */
+  html, body { max-width: 100%; overflow-x: hidden; }
+  .app-shell, .page { max-width: 100%; }
+  img, video, iframe { max-width: 100%; }
+  .card, .form-card, .hero, .auth-card { min-width: 0; overflow-wrap: break-word; }
+  h1, h2, h3, h4 { overflow-wrap: break-word; }
+
+  /* --- 1. Header / navigation: full width, brand hard left, Logout hard right.
+         Equivalent of Tailwind `w-full flex items-center justify-between px-4 py-3`. --- */
+  .topbar {
+    width: 100%;
+    max-width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: nowrap;
+    gap: 8px 12px;
+    padding: 12px 16px;
+  }
+  /* Brand block: left-aligned, truncates instead of pushing the nav off-screen. */
+  .topbar > div:first-child { min-width: 0; flex: 1 1 0%; }
+  .topbar .brand { font-size: 1.35rem; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .topbar .subtitle { font-size: 0.72rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* Actions (Application / Logout): right-aligned on the same row, wrapping neatly
+     when space runs out; min-width:0 prevents background cutoff / right-side leaks. */
+  .nav {
+    margin-left: auto;
+    flex: 0 1 auto;
+    min-width: 0;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px 14px;
+  }
+  .nav a { font-size: 0.85rem; white-space: nowrap; }
+  .nav .logout-button { order: 99; margin-left: auto; flex: 0 0 auto; }
+
+  /* --- 2. Tables: horizontal swipe, never squished single-letter columns. --- */
+  .table-scroll, .table-wrap { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .table-scroll > table, .table-wrap > table { width: 100%; min-width: 800px; }
+  .table-scroll th, .table-scroll td,
+  .table-wrap th, .table-wrap td { white-space: nowrap; padding: 8px 16px; font-size: 0.875rem; }
+
+  /* --- 3. Forms, cards and filter controls: single column, full-width inputs. --- */
+  .page { padding: 20px 12px 48px; }
+  .form-card { padding: 18px 14px; }
+  .table-card { padding: 16px 12px; }
+  .metric { padding: 16px; }
+  .dashboard-grid { grid-template-columns: 1fr; }
+  .field-grid, .emi-grid { grid-template-columns: 1fr; }
+  .toolbar { flex-direction: column; align-items: stretch; flex-wrap: wrap; }
+  .toolbar input, .toolbar select { width: 100%; min-width: 0; }
+  .dashboard-search { max-width: 100%; }
+  label input:not([type=checkbox]):not([type=radio]),
+  label select,
+  label textarea { width: 100%; max-width: 100%; }
+  select, textarea { max-width: 100%; }
+
+  /* Stack action rows vertically with full-width buttons. */
+  .inline-actions { flex-direction: column; align-items: stretch; }
+  .inline-actions button,
+  .inline-actions .primary,
+  .inline-actions .secondary,
+  .inline-actions > label { width: 100%; }
+  /* Standalone primary/secondary actions inside cards and staff sections. */
+  .card > .primary, .card > .secondary,
+  .form-card > .primary, .form-card > .secondary,
+  .form-card section > .primary, .form-card section > .secondary {
+    display: block;
+    width: 100%;
+    margin-top: 8px;
+  }
+
+  /* Flexible rows that must wrap instead of overflowing the viewport. */
+  .score-box { flex-wrap: wrap; gap: 10px; }
+  .application-search-result, .doc-item, .meta-row { flex-wrap: wrap; }
+
+  /* --- Step indicator (Steps 1-5): one clean horizontally scrollable row of pills.
+         Equivalent of Tailwind `flex overflow-x-auto no-scrollbar gap-2 py-2 w-full`. --- */
+  .hero { width: 100%; min-width: 0; }
+  .hero > div { min-width: 0; max-width: 100%; }
+  .stepper {
+    width: 100%;
+    min-width: 0;
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 8px;
+    padding: 8px 0;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;         /* no-scrollbar (Firefox) */
+  }
+  .stepper::-webkit-scrollbar { display: none; }  /* no-scrollbar (WebKit) */
+  .stepper .step { flex: 0 0 auto; width: auto; min-width: 108px; }
+
+  /* --- Form card ("Applicant Details"): never wider than the viewport.
+         Equivalent of Tailwind `w-full max-w-full px-4`. --- */
+  .card, .form-card { width: 100%; max-width: 100%; }
+  .form-card { padding-left: 16px; padding-right: 16px; }
+
+  /* --- Bottom action bar (Back / Save Draft / Continue): full-width, easy-to-tap
+         stacked buttons with even gaps; the step/save status line stays readable. --- */
+  .inline-actions { width: 100%; gap: 8px; }
+  .inline-actions > span { width: 100%; text-align: center; }
+}
+

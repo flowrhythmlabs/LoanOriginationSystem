@@ -256,6 +256,7 @@ The frontend reaches the API through Vite's `/api` proxy. Protected endpoints re
 | `POST /api/auth/login/admin` | Validates backend-configured admin credentials and returns a bearer `accessToken`; invalid credentials return 401. |
 | `POST /api/auth/logout` | Revokes the bearer token supplied in the Authorization header. |
 | `GET /api/applications` | Lists all application summaries for Admin or only the authenticated user's own applications. Returns ID, reference number, applicant name/mobile, loan type, status, creation time, score, and amount. |
+| `GET /api/public/config` | Unauthenticated, read-only configuration for the public institution name, short name, tagline, application title, and canonical public URL. No credentials or internal settings are returned. |
 | `POST /api/applications` | Creates a draft. JSON body has `applicant`, `employment`, and `loanDetails`; returns application details including ID, status, and any LOS number. |
 | `GET /api/applications/{id}` | Returns application fields, status, persisted credit score if available, and application reference; access is checked against the authenticated principal. |
 | `PUT /api/applications/{id}` | Updates applicant, employment, and loan details. Uses the same JSON body shape as create. |
@@ -281,6 +282,55 @@ KYC state values are `INITIATED`, `PENDING`, `VERIFIED`, `FAILED`, and `MANUAL_R
 ## 15. Configuration
 
 Runtime settings are in [backend/src/main/resources/application.yml](backend/src/main/resources/application.yml); test settings are in [backend/src/main/resources/application-test.yml](backend/src/main/resources/application-test.yml).
+
+### Institution branding and public URL
+
+The shared `los.branding` and `los.url` properties in `application.yml` control the institution name, short name, login tagline, browser/application title, and public canonical URL. Defaults retain the FinEdge NBFC name and tagline. For a separate bank deployment, change YAML values or set the corresponding environment variables; environment variables take precedence:
+
+| YAML property | Environment override | Default |
+| --- | --- | --- |
+| `los.branding.institution-name` | `LOS_INSTITUTION_NAME` | `FinEdge NBFC` |
+| `los.branding.short-name` | `LOS_SHORT_NAME` | `FinEdge` |
+| `los.branding.tagline` | `LOS_TAGLINE` | `Your Growth. Our Support.` |
+| `los.branding.application-name` | `LOS_APPLICATION_NAME` | `FinEdge Loan Origination System` |
+| `los.url.public-base-url` | `LOS_PUBLIC_BASE_URL` | `http://localhost:5173` |
+
+For example, configure another bank in YAML (or set the same values through environment variables):
+
+```yaml
+los:
+  branding:
+    institution-name: "Example Bank"
+    short-name: "Example"
+    tagline: "Banking Solutions for Your Future."
+    application-name: "Example Bank Loan Origination System"
+  url:
+    public-base-url: "https://los.examplebank.com"
+```
+
+In PowerShell, environment overrides can be set before starting the backend:
+
+```powershell
+$env:LOS_INSTITUTION_NAME = "Example Bank"
+$env:LOS_SHORT_NAME = "Example"
+$env:LOS_TAGLINE = "Banking Solutions for Your Future."
+$env:LOS_APPLICATION_NAME = "Example Bank Loan Origination System"
+$env:LOS_PUBLIC_BASE_URL = "https://los.examplebank.com"
+```
+
+The frontend requests these approved public values from `GET /api/public/config`, starts immediately with the FinEdge defaults, and keeps that fallback if the endpoint is unavailable. The endpoint is the only new anonymous API route; existing `/api/**` security remains in force. Frontend API calls remain relative `/api` paths and Vite continues proxying them to `http://localhost:8080`; no client-side API IP address or permissive CORS rule is required.
+
+`public-base-url` is a canonical/public URL value only. A URL combines a scheme (`http` or `https`), a hostname or IP address, and an optional port. YAML cannot create DNS records, change a machine's hostname, bind a server to a new interface, open a firewall, or redirect a browser's address bar. The development server remains on port `5173` by default (backend `8080`) unless its own deployment configuration is changed. If that port is occupied, Vite may choose another port; use the actual address it prints.
+
+For a LAN-only demonstration using `http://finedge:5173`:
+
+1. Set `los.url.public-base-url` (or `LOS_PUBLIC_BASE_URL`) to `http://finedge:5173`.
+2. Make `finedge` resolve to the frontend host's actual LAN IP. Use the organization's local DNS, or add that mapping to the hosts file on every client, for example `192.168.1.10 finedge` only if that is the frontend host's real address.
+3. Before starting Vite, set `VITE_ALLOWED_HOSTS=finedge` in the frontend process environment (or its local Vite environment file). This is an exact hostname allowlist for Vite's development host check; do not use a wildcard or allow arbitrary hosts.
+4. Ensure the frontend is bound to the LAN interface (`vite.config.ts` uses `0.0.0.0`) and the host firewall permits client access to port `5173`. The Vite `/api` proxy still connects locally to the backend on port `8080`.
+5. Restart the backend and frontend after configuration changes, then open `http://finedge:5173` from a client and verify the branding endpoint and login page.
+
+For production, use a domain controlled by the institution, create the required public or private DNS records to the reverse proxy/load balancer, configure HTTPS with a valid certificate, and allow only the required network paths through firewalls. Configure that proxy to serve the frontend and route `/api` to the backend on a private network. Set `LOS_PUBLIC_BASE_URL` to the real HTTPS URL. The public URL setting itself does not perform any of these infrastructure steps.
 
 | Environment variable | Default/use |
 | --- | --- |

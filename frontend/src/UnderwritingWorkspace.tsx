@@ -24,7 +24,7 @@ const reasonsByStage:Record<string,string[]> = {
 const human = (s:string) => s.replaceAll('_',' ').toLowerCase().replace(/\b\w/g,c=>c.toUpperCase());
 function Details({label,value}:{label:string;value:unknown}) { return <table style={{width:'100%',borderCollapse:'collapse',tableLayout:'fixed'}}><tbody><tr><th scope='row' style={{width:'35%',padding:8,textAlign:'left',border:'1px solid #e5e7eb'}}>{label}</th><td style={{padding:8,border:'1px solid #e5e7eb',overflowWrap:'anywhere'}}>{value==null || value===''?'—':String(value)}</td></tr></tbody></table>; }
 function Section({title,data}:{title:string;data:RecordMap|undefined}) {
-  return <section style={{marginTop:18}}><h4>{title}</h4>{data ? Object.entries(data).filter(([key])=>!['additionalDetails'].includes(key)).map(([key,value])=><Details key={key} label={human(key)} value={typeof value==='object' ? JSON.stringify(value) : value}/>) : <p>Not provided</p>}{data?.additionalDetails && <details><summary>Additional details</summary>{Object.entries(data.additionalDetails as RecordMap).map(([k,v])=><Details key={k} label={human(k)} value={v}/>)}</details>}</section>;
+  return <section style={{marginTop:18}}><h4>{title}</h4>{data ? Object.entries(data).filter(([key])=>!['additionalDetails'].includes(key)).map(([key,value])=><Details key={key} label={human(key)} value={typeof value==='object' ? JSON.stringify(value) : value}/>) : <p>Not provided</p>}{data?.additionalDetails != null && <details><summary>Additional details</summary>{Object.entries(data.additionalDetails as RecordMap).map(([k,v])=><Details key={k} label={human(k)} value={v}/>)}</details>}</section>;
 }
 export function UnderwritingWorkspace({session}:{session:AuthSession}) {
   const [stage,setStage]=useState(''); const [queue,setQueue]=useState<Row[]>([]); const [selected,setSelected]=useState<Row|null>(null);
@@ -122,8 +122,8 @@ export function UnderwritingWorkspace({session}:{session:AuthSession}) {
     <p>Signed in as: {human(stage||'Staff')}. Applications are routed according to the latest recorded workflow action.</p>
     {message&&<p role={messageType==='error'?'alert':'status'} aria-live={messageType==='error'?'assertive':'polite'} style={{padding:'12px 14px',borderRadius:8,fontWeight:600,background:messageType==='error'?'#fff1f2':'#ecfdf5',border:`1px solid ${messageType==='error'?'#fda4af':'#86efac'}`,color:messageType==='error'?'#b91c1c':'#166534'}}>{message}</p>}
     <button type="button" className="secondary" onClick={()=>void refresh()}>Refresh applications</button>
-    <table><thead><tr><th>Application</th><th>Applicant</th><th>Product</th><th>Amount</th><th>Status</th><th>Previous action</th><th/></tr></thead>
-    <tbody>{queue.length===0?<tr><td colSpan={7}>No applications currently assigned to this stage.</td></tr>:queue.map(r=><tr key={r.id}><td>{r.application_number||`DRAFT-${r.id}`}</td><td>{r.applicant_name||'—'}</td><td>{human(r.loan_type||'—')}</td><td>{r.requested_loan_amount??'—'}</td><td>{human(r.status)}</td><td>{r.last_action?human(r.last_action):'Awaiting processor'}</td><td><button className="secondary" type="button" onClick={()=>void open(r)}>Review full application</button></td></tr>)}</tbody></table>
+    <div className="table-scroll"><table><thead><tr><th>Application</th><th>Applicant</th><th>Product</th><th>Amount</th><th>Status</th><th>Previous action</th><th/></tr></thead>
+    <tbody>{queue.length===0?<tr><td colSpan={7}>No applications currently assigned to this stage.</td></tr>:queue.map(r=><tr key={r.id}><td>{r.application_number||`DRAFT-${r.id}`}</td><td>{r.applicant_name||'—'}</td><td>{human(r.loan_type||'—')}</td><td>{r.requested_loan_amount??'—'}</td><td>{human(r.status)}</td><td>{r.last_action?human(r.last_action):'Awaiting processor'}</td><td><button className="secondary" type="button" onClick={()=>void open(r)}>Review full application</button></td></tr>)}</tbody></table></div>
     {selected&&<section style={{marginTop:24,borderTop:'2px solid #cbd5e1',paddingTop:16}}>
       <button className="secondary" type="button" onClick={()=>{closePreview();setSelected(null);setDetail(null);}}>← Back to applications</button>
       <h3>Full application — {selected.application_number}</h3>
@@ -134,7 +134,7 @@ export function UnderwritingWorkspace({session}:{session:AuthSession}) {
         <Section title="Loan terms" data={app.loanDetails as RecordMap}/>
         <Section title="Credit score (self-reported unless bureau evidence is available)" data={app.creditCheck as RecordMap}/>
         <h4>Uploaded documents</h4><p style={{fontSize:13}}>Select Preview to inspect the original uploaded PDF or image. Preview does not mark the document as verified.</p>
-        <div style={{overflowX:'auto'}}><table><thead><tr><th>Document Type</th><th>Description</th><th>Status</th><th>Preview</th></tr></thead><tbody>
+        <div className="table-scroll"><table><thead><tr><th>Document Type</th><th>Description</th><th>Status</th><th>Preview</th></tr></thead><tbody>
           {documentTypes.map(([type,description])=>{
             const doc=((detail?.documents as RecordMap[])||[]).find(d=>d.document_type===type);
             return <tr key={type}><td>{type}</td><td>{description}</td><td>{String(doc?.status||'NOT_UPLOADED')}</td><td>
@@ -172,7 +172,7 @@ export function UnderwritingWorkspace({session}:{session:AuthSession}) {
             <label>Beneficiary IFSC<input value={beneficiaryIfsc} onChange={e=>setBeneficiaryIfsc(e.target.value.toUpperCase())} maxLength={11}/></label>
             <label>Disbursal reference<input value={operationRef} onChange={e=>setOperationRef(e.target.value)} maxLength={100}/></label>
           </div>
-          <button type="button" className="primary" disabled={busy||selected.status!=='APPROVED'||(disbursal?.status&&disbursal.status!=='NOT_STARTED')} onClick={()=>void processDisbursal()}>Process Disbursal</button>
+          <button type="button" className="primary" disabled={busy||selected.status!=='APPROVED'||(Boolean(disbursal?.status) && disbursal?.status !== 'NOT_STARTED')} onClick={()=>void processDisbursal()}>Process Disbursal</button>
           <button type="button" className="secondary" disabled={busy} onClick={()=>void loadDisbursal(selected.id)}>Refresh Provider Status</button>
         </section>}
         <h4>Decision timeline</h4>{timeline.length?timeline.map((t,i)=><p key={i}>{human(String(t.action))} — {String(t.reason_code)} by {String(t.actor)} ({String(t.created_at)})</p>):<p>No decisions yet.</p>}
