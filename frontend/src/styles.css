@@ -726,3 +726,71 @@ label:has(> .required-asterisk) > .field-success {
   .inline-actions > span { width: 100%; text-align: center; }
 }
 
+/* ==================================================================
+   FINANCE GREEN GLOBAL THEME
+   Palette: #0F382C (deep green) / #1E7B62 (accent green).
+   Appended overrides only — re-themes buttons, inputs, focus states
+   and headers across the whole app. No layout or logic changes.
+   ================================================================== */
+:root {
+  --fg-deep: #0F382C;
+  --fg-accent: #1E7B62;
+  --fg-accent-soft: #e6f4ef;
+  --fg-accent-ring: rgba(30, 123, 98, 0.16);
+  --fg-accent-border: #9fcfbf;
+}
+
+/* --- Headers ------------------------------------------------------ */
+h1, h2, h3, h4 { color: var(--fg-deep); }
+.topbar { background: var(--fg-deep); color: #fff; }
+.topbar .brand, .topbar .subtitle { color: #fff; }
+.nav a { color: #d8ece4; }
+.nav a.active { color: #fff; }
+.auth-design-panel h1 { color: var(--fg-deep); }
+.new-login-welcome h2 { color: var(--fg-deep); }
+.auth-badge { background: var(--fg-accent-soft); color: var(--fg-accent); }
+.secure-label { background: var(--fg-accent-soft); color: var(--fg-accent); }
+.new-login-top { color: var(--fg-deep); }
+.new-login-top span { background: var(--fg-accent-soft); }
+
+/* --- Buttons ------------------------------------------------------ */
+.primary { background: linear-gradient(135deg, var(--fg-deep), var(--fg-accent)); color: #fff; }
+.secondary { background: var(--fg-accent-soft); color: var(--fg-deep); }
+.password-toggle { color: var(--fg-accent); }
+.login-resend { color: var(--fg-accent); }
+.auth-mode-card { color: var(--fg-deep); }
+.auth-mode-card.selected {
+  background: linear-gradient(135deg, #e9f6f1, #f0faf6);
+  border-color: var(--fg-accent-border);
+  box-shadow: inset 0 0 0 1px rgba(30, 123, 98, 0.18);
+}
+
+/* --- Inputs ------------------------------------------------------- */
+input[type="checkbox"], input[type="radio"] { accent-color: var(--fg-accent); }
+.credit-consent-row input[type="checkbox"] { accent-color: var(--fg-accent); }
+
+/* --- Focus states ------------------------------------------------- */
+input:focus, select:focus, textarea:focus {
+  outline: none;
+  border-color: var(--fg-accent);
+  box-shadow: 0 0 0 4px var(--fg-accent-ring);
+}
+.auth-field input:focus {
+  border-color: var(--fg-accent);
+  box-shadow: 0 0 0 4px var(--fg-accent-ring);
+}
+button:focus-visible, a:focus-visible, [role="button"]:focus-visible {
+  outline: 2px solid var(--fg-accent);
+  outline-offset: 2px;
+}
+/* Keep a visible white focus ring on the dark green topbar. */
+.nav .home-button:focus-visible, .topbar a:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
+
+/* --- Progress / accent elements tied to the theme color ----------- */
+.step.done { border-color: var(--fg-accent); background: #eef8f4; }
+.step.done span { background: var(--fg-accent); color: #fff; }
+.step.current { border-color: var(--fg-accent); background: #f6fbf9; }
+.step.current span { background: var(--fg-accent); color: #fff; }
+.spinner { border-color: #cde7de; border-top-color: var(--fg-accent); }
+.verification-progress { border-color: #bfe0d4; color: var(--fg-deep); background: #f1faf6; }
+
