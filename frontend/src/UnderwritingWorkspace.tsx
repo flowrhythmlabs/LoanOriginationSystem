@@ -124,7 +124,7 @@ export function UnderwritingWorkspace({session}:{session:AuthSession}) {
     <button type="button" className="secondary" onClick={()=>void refresh()}>Refresh applications</button>
     <div className="table-scroll"><table><thead><tr><th>Application</th><th>Applicant</th><th>Product</th><th>Amount</th><th>Status</th><th>Previous action</th><th/></tr></thead>
     <tbody>{queue.length===0?<tr><td colSpan={7}>No applications currently assigned to this stage.</td></tr>:queue.map(r=><tr key={r.id}><td>{r.application_number||`DRAFT-${r.id}`}</td><td>{r.applicant_name||'—'}</td><td>{human(r.loan_type||'—')}</td><td>{r.requested_loan_amount??'—'}</td><td>{human(r.status)}</td><td>{r.last_action?human(r.last_action):'Awaiting processor'}</td><td><button className="secondary" type="button" onClick={()=>void open(r)}>Review full application</button></td></tr>)}</tbody></table></div>
-    {selected&&<section style={{marginTop:24,borderTop:'2px solid #cbd5e1',paddingTop:16}}>
+    {selected&&<section style={{width:'100%',minWidth:0,marginTop:24,borderTop:'2px solid #cbd5e1',paddingTop:16}}>
       <button className="secondary" type="button" onClick={()=>{closePreview();setSelected(null);setDetail(null);}}>← Back to applications</button>
       <h3>Full application — {selected.application_number}</h3>
       {busy&&!detail?<p>Loading application…</p>:null}
@@ -149,15 +149,17 @@ export function UnderwritingWorkspace({session}:{session:AuthSession}) {
         </section>}
         <h4>Verification evidence</h4>
         {reviews.length?reviews.map((v,i)=><p key={i}><strong>{human(String(v.check_type))}: {human(String(v.outcome))}</strong> — {String(v.evidence_reference||'—')} ({String(v.reviewer_username||'—')}) {v.notes?`— ${String(v.notes)}`:''}</p>):<p>No manual reviews recorded. {canRecordReview?'Use the form below to record evidence before forwarding.':'This role has read-only access to verification evidence.'}</p>}
-        {canRecordReview&&<section style={{padding:16,border:'1px solid #cbd5e1',borderRadius:8,marginTop:12}}>
-          <h4>Record Manual Review</h4><p style={{fontSize:13}}>Manual evidence is not live provider verification.</p>
+        {canRecordReview&&<section style={{display:'grid',gap:16,width:'100%',minWidth:0,padding:16,border:'1px solid #cbd5e1',borderRadius:8,marginTop:12}}>
+          <h4 style={{margin:0}}>Record Manual Review</h4><p style={{fontSize:13,margin:0}}>Manual evidence is not live provider verification.</p>
           <div className="field-grid">
             <label>Verification check<select value={checkType} onChange={e=>setCheckType(e.target.value)}>{checks.map(v=><option key={v} value={v}>{human(v)}</option>)}</select></label>
             <label>Outcome<select value={outcome} onChange={e=>setOutcome(e.target.value)}><option value="PASS">Pass</option><option value="FAIL">Fail</option><option value="PENDING">Pending</option></select></label>
             <label className="full-width">Evidence reference *<input value={evidenceReference} onChange={e=>setEvidenceReference(e.target.value)} maxLength={250} placeholder="Document ID / evidence reference" /></label>
             <label className="full-width">Review remarks<textarea value={reviewNotes} onChange={e=>setReviewNotes(e.target.value)} maxLength={2000} rows={3}/></label>
           </div>
-          <button type="button" className="primary" disabled={reviewLoading||busy||!evidenceReference.trim()} onClick={()=>void recordReview()}>{reviewLoading?'Saving review…':'Record Manual Review'}</button>
+          <div className="inline-actions" style={{marginTop:0}}>
+            <button type="button" className="primary" disabled={reviewLoading||busy||!evidenceReference.trim()} onClick={()=>void recordReview()}>{reviewLoading?'Saving review…':'Record Manual Review'}</button>
+          </div>
         </section>}
         {stage==='OPERATIONS'&&<section style={{padding:16,border:'1px solid #cbd5e1',borderRadius:8,marginTop:12}}>
           <h4>Disbursal and Loan Account</h4>
@@ -176,12 +178,15 @@ export function UnderwritingWorkspace({session}:{session:AuthSession}) {
           <button type="button" className="secondary" disabled={busy} onClick={()=>void loadDisbursal(selected.id)}>Refresh Provider Status</button>
         </section>}
         <h4>Decision timeline</h4>{timeline.length?timeline.map((t,i)=><p key={i}>{human(String(t.action))} — {String(t.reason_code)} by {String(t.actor)} ({String(t.created_at)})</p>):<p>No decisions yet.</p>}
-        {(actionsByStage[stage]||[]).length>0&&<section style={{marginTop:20,padding:16,border:'1px solid #cbd5e1',borderRadius:8}}><h3>{stage==='APPLICATION_PROCESSOR'?'Forward to Credit Underwriter':stage==='CREDIT_UNDERWRITER'?'Underwriting recommendation':'Credit Manager decision'}</h3>
-          {stage==='CREDIT_MANAGER'&&<p>Final approval requires a separate underwriter recommendation, sufficient approval authority, current verification evidence, and applicable bureau consent.</p>}
+        {(actionsByStage[stage]||[]).length>0&&<section style={{display:'grid',gap:16,width:'100%',minWidth:0,marginTop:20,padding:16,border:'1px solid #cbd5e1',borderRadius:8}}><h3 style={{margin:0}}>{stage==='APPLICATION_PROCESSOR'?'Forward to Credit Underwriter':stage==='CREDIT_UNDERWRITER'?'Underwriting recommendation':'Credit Manager decision'}</h3>
+          {stage==='CREDIT_MANAGER'&&<p style={{margin:0}}>Final approval requires a separate underwriter recommendation, sufficient approval authority, current verification evidence, and applicable bureau consent.</p>}
           <div className="field-grid"><label>Action<select value={action} onChange={e=>setAction(e.target.value)}>{actionsByStage[stage].map(a=><option key={a} value={a}>{human(a)}</option>)}</select></label>
           <label>Reason code<select value={reasonCode} onChange={e=>setReasonCode(e.target.value)}><option value="">Select reason</option>{(reasonsByStage[stage]||[]).map(v=><option key={v} value={v}>{human(v)}</option>)}</select></label>
           <label className="full-width">Review remarks<textarea value={notes} onChange={e=>setNotes(e.target.value)} rows={3}/></label></div>
-          <button className="primary" type="button" disabled={busy} onClick={()=>void submit()}>{stage==='APPLICATION_PROCESSOR'?'Forward to Underwriter':'Submit Decision'}</button></section>}
+          <div className="inline-actions" style={{marginTop:0}}>
+            <button className="primary" type="button" disabled={busy} onClick={()=>void submit()}>{stage==='APPLICATION_PROCESSOR'?'Forward to Underwriter':'Submit Decision'}</button>
+          </div>
+        </section>}
       </>}
     </section>}
   </section>;
