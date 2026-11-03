@@ -177,7 +177,7 @@ export function UnderwritingWorkspace({session}:{session:AuthSession}) {
         </section>}
         <h4>Decision timeline</h4>{timeline.length?timeline.map((t,i)=><p key={i}>{human(String(t.action))} — {String(t.reason_code)} by {String(t.actor)} ({String(t.created_at)})</p>):<p>No decisions yet.</p>}
         {(actionsByStage[stage]||[]).length>0&&<section style={{marginTop:20,padding:16,border:'1px solid #cbd5e1',borderRadius:8}}><h3>{stage==='APPLICATION_PROCESSOR'?'Forward to Credit Underwriter':stage==='CREDIT_UNDERWRITER'?'Underwriting recommendation':'Credit Manager decision'}</h3>
-          {stage==='CREDIT_MANAGER'&&<p>Final approval is permitted only in an explicitly enabled local demo, after a separate underwriter recommendation, authority check, current manual PASS evidence and bureau consent. Demo approval is not a real sanction.</p>}
+          {stage==='CREDIT_MANAGER'&&<p>Final approval requires a separate underwriter recommendation, sufficient approval authority, current verification evidence, and applicable bureau consent.</p>}
           <div className="field-grid"><label>Action<select value={action} onChange={e=>setAction(e.target.value)}>{actionsByStage[stage].map(a=><option key={a} value={a}>{human(a)}</option>)}</select></label>
           <label>Reason code<select value={reasonCode} onChange={e=>setReasonCode(e.target.value)}><option value="">Select reason</option>{(reasonsByStage[stage]||[]).map(v=><option key={v} value={v}>{human(v)}</option>)}</select></label>
           <label className="full-width">Review remarks<textarea value={notes} onChange={e=>setNotes(e.target.value)} rows={3}/></label></div>

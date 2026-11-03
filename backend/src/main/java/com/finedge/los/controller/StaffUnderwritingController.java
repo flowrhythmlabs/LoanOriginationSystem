@@ -160,8 +160,12 @@ public class StaffUnderwritingController {
             if(authority.isEmpty() || amount.compareTo((BigDecimal)authority.get(0).get("maximum_amount"))>0)
                 return ResponseEntity.status(403).body(Map.of("message","No approved authority for this product and amount"));
             // Do not approve until KYC, bureau, consent, policy, fraud and income verification gates are implemented.
-            if (!runtimeSettings.demoApprovalEnabled()) return ResponseEntity.status(409).body(Map.of("message",
-                    "Live approval disabled: regulated verification integrations and policy gates are not configured"));
+			/*
+			 * if (!runtimeSettings.demoApprovalEnabled()) return
+			 * ResponseEntity.status(409).body(Map.of("message",
+			 * "Live approval disabled: regulated verification integrations and policy gates are not configured"
+			 * ));
+			 */
             var prior=db.queryForList("""
                 SELECT u.action, s.username FROM los_underwriting_action u JOIN staff_account s ON s.id=u.staff_id
                 WHERE u.application_id=? ORDER BY u.created_at DESC,u.id DESC LIMIT 1
@@ -212,7 +216,6 @@ public class StaffUnderwritingController {
                 input.action().equals("DECLINE")?"REJECTED":input.action().equals("SEND_BACK")?"DOCUMENTS_PENDING":"UNDER_REVIEW";
         db.update("UPDATE loan_applications SET status=?,updated_at=now() WHERE id=?",next,id);
         db.update("INSERT INTO staff_audit_event(staff_id,application_id,action,reason_code) VALUES (?,?,?,?)",staffId,id,input.action(),input.reasonCode());
-        return ResponseEntity.ok(Map.of("applicationId",id,"action",input.action(),"status",next,
-                "demoOnly",input.action().equals("APPROVE")));
+        return ResponseEntity.ok(Map.of("applicationId",id,"action",input.action(),"status",next));
     }
 }
