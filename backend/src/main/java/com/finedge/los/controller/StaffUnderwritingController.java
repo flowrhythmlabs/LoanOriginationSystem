@@ -216,7 +216,6 @@ public class StaffUnderwritingController {
                 input.action().equals("DECLINE")?"REJECTED":input.action().equals("SEND_BACK")?"DOCUMENTS_PENDING":"UNDER_REVIEW";
         db.update("UPDATE loan_applications SET status=?,updated_at=now() WHERE id=?",next,id);
         db.update("INSERT INTO staff_audit_event(staff_id,application_id,action,reason_code) VALUES (?,?,?,?)",staffId,id,input.action(),input.reasonCode());
-        return ResponseEntity.ok(Map.of("applicationId",id,"action",input.action(),"status",next,
-                "demoOnly",input.action().equals("APPROVE")));
+        return ResponseEntity.ok(Map.of("applicationId",id,"action",input.action(),"status",next));
     }
 }

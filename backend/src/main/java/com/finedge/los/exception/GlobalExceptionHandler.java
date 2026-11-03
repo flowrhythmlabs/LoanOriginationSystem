@@ -24,6 +24,12 @@ import java.util.Map;
 public class GlobalExceptionHandler {
     private static final Logger logger = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
+    @ExceptionHandler(org.springframework.web.HttpRequestMethodNotSupportedException.class)
+    public ResponseEntity<ApiError> handleUnsupportedMethod(org.springframework.web.HttpRequestMethodNotSupportedException ex, HttpServletRequest request) {
+        return ResponseEntity.status(HttpStatus.METHOD_NOT_ALLOWED)
+            .body(new ApiError(Instant.now(), HttpStatus.METHOD_NOT_ALLOWED.value(),
+                "HTTP method not supported for this endpoint.", request.getRequestURI(), null));
+    }
     @ExceptionHandler(HttpMessageNotReadableException.class)
     public ResponseEntity<ApiError> handleUnreadableRequest(HttpMessageNotReadableException ex, HttpServletRequest request) {
         ApiError apiError = new ApiError(Instant.now(), HttpStatus.BAD_REQUEST.value(), "Request contains an invalid field format. Check date of birth, dates, numeric values and selected options.", request.getRequestURI(), null);
