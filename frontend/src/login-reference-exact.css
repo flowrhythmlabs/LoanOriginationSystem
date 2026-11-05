@@ -1,0 +1,93 @@
+/* Corporate reference composition: three deliberately spaced visual zones. */
+.auth-page-shell.layout-corporate-banking {
+  --login-gold:#d6aa5f;
+  display:grid!important; grid-template-columns:minmax(0,36%) minmax(0,29%) minmax(380px,35%)!important;
+  position:relative!important; isolation:isolate!important;
+  min-height:100vh!important; min-height:100dvh!important;
+  width:100%!important; margin:0!important; padding:0!important;
+  background:linear-gradient(115deg,#0c3b71 0%,#07376e 58%,#2671bc 100%)!important;
+  align-items:stretch!important; overflow:hidden!important;
+}
+.auth-page-shell.layout-corporate-banking .auth-design-panel {
+  display:contents!important;
+}
+.auth-page-shell.layout-corporate-banking .login-hero-photo {
+  display:block!important; position:relative!important; inset:auto!important;
+  grid-column:1!important;grid-row:1!important; width:100%!important;height:100%!important;
+  background-image:linear-gradient(0deg,rgba(3,37,76,.18),rgba(3,37,76,.04)),url('/corporate-hero-portrait.jpg')!important;
+  background-size:cover!important;background-position:50% center!important;
+  opacity:1!important;transform:none!important;
+}
+.auth-page-shell.layout-corporate-banking .login-hero-overlay{display:none!important}
+.auth-page-shell.layout-corporate-banking .login-hero-brand{
+  position:absolute!important;z-index:5!important;top:25px!important;left:24px!important;
+  display:flex!important;align-items:center!important;gap:10px!important;
+  width:auto!important;max-width:36%!important;margin:0!important;padding:0!important;
+  color:#fff!important;text-shadow:0 2px 9px rgba(0,0,0,.38)!important;
+}
+.auth-page-shell.layout-corporate-banking .login-hero-emblem{font-size:36px!important;color:#fff!important}
+.auth-page-shell.layout-corporate-banking .login-hero-brand strong{font-size:clamp(19px,2vw,29px)!important;color:#fff!important;white-space:nowrap!important}
+.auth-page-shell.layout-corporate-banking .login-hero-brand small{font-size:12px!important;color:#fff!important}
+.auth-page-shell.layout-corporate-banking .login-hero-quote{
+  grid-column:2!important;grid-row:1!important;position:relative!important;
+  top:auto!important;left:auto!important;right:auto!important;bottom:auto!important;
+  width:auto!important;max-width:none!important;transform:none!important;
+  margin:0!important;padding:0 25px 0 28px!important;
+  display:flex!important;flex-direction:column!important;align-items:flex-start!important;
+  justify-content:center!important;z-index:2!important;
+}
+.auth-page-shell.layout-corporate-banking .login-hero-quote blockquote{
+  font-family:Georgia,'Times New Roman',serif!important;
+  font-size:clamp(28px,2.45vw,42px)!important;font-style:italic!important;font-weight:400!important;
+  line-height:1.24!important;letter-spacing:-.015em!important;
+  color:#fff!important;margin:0!important;padding:0!important;border:0!important;
+  word-break:normal!important;overflow-wrap:normal!important;
+}
+.auth-page-shell.layout-corporate-banking .quote-symbol{
+  display:block!important;color:#d6aa5f!important;font:74px Georgia,serif!important;
+  line-height:.75!important;margin-bottom:14px!important;
+}
+.auth-page-shell.layout-corporate-banking .quote-rule{
+  display:block!important;background:#d6aa5f!important;width:88px!important;height:4px!important;
+  margin-top:28px!important;
+}
+.auth-page-shell.layout-corporate-banking .auth-card{
+  grid-column:3!important;grid-row:1!important;position:relative!important;
+  display:flex!important;flex-direction:column!important;justify-content:center!important;
+  align-self:center!important;justify-self:center!important;z-index:4!important;
+  width:calc(100% - 68px)!important;max-width:445px!important;min-width:0!important;
+  max-height:calc(100dvh - 36px)!important;overflow-y:auto!important;
+  margin:0!important;padding:30px 28px!important;
+  background:#fff!important;border:0!important;border-radius:20px!important;
+  box-shadow:0 18px 40px rgba(0,23,54,.20)!important;
+}
+.auth-page-shell.layout-corporate-banking .login-card-title{
+  display:flex!important;flex-direction:row!important;align-items:center!important;
+  justify-content:center!important;gap:14px!important;text-align:left!important;
+  margin:0 0 24px!important;
+}
+.auth-page-shell.layout-corporate-banking .login-card-symbol{font-size:34px!important;color:#b9cddd!important}
+.auth-page-shell.layout-corporate-banking .login-card-title h2{font-size:30px!important;color:#121a27!important;margin:0 0 4px!important}
+.auth-page-shell.layout-corporate-banking .login-card-title p{font-size:13px!important;color:#4a5667!important;margin:0!important}
+.auth-page-shell.layout-corporate-banking .auth-form{width:100%!important}
+.auth-page-shell.layout-corporate-banking .auth-field{margin-bottom:16px!important}
+.auth-page-shell.layout-corporate-banking .auth-card input:not([type=checkbox]){background:#fff!important;border:1px solid #c7ced9!important;border-radius:7px!important;min-height:43px!important}
+.auth-page-shell.layout-corporate-banking .auth-submit{min-height:44px!important;background:#073c83!important;color:#fff!important;border-radius:8px!important}
+@media(max-width:1050px){
+ .auth-page-shell.layout-corporate-banking{grid-template-columns:minmax(0,31%) minmax(0,29%) minmax(350px,40%)!important}
+ .auth-page-shell.layout-corporate-banking .login-hero-quote{padding:0 16px!important}
+ .auth-page-shell.layout-corporate-banking .login-hero-quote blockquote{font-size:clamp(23px,2.9vw,33px)!important}
+ .auth-page-shell.layout-corporate-banking .auth-card{width:calc(100% - 36px)!important;padding:24px!important}
+}
+@media(max-width:760px){
+ .auth-page-shell.layout-corporate-banking{display:grid!important;grid-template-columns:43% 57%!important;grid-template-rows:280px auto!important;min-height:100dvh!important;overflow-y:auto!important}
+ .auth-page-shell.layout-corporate-banking .login-hero-photo{grid-column:1!important;grid-row:1!important}
+ .auth-page-shell.layout-corporate-banking .login-hero-quote{grid-column:2!important;grid-row:1!important;padding:54px 16px 12px!important}
+ .auth-page-shell.layout-corporate-banking .login-hero-quote blockquote{font-size:clamp(18px,4vw,26px)!important}
+ .auth-page-shell.layout-corporate-banking .quote-symbol{font-size:42px!important;margin-bottom:6px!important}
+ .auth-page-shell.layout-corporate-banking .quote-rule{margin-top:12px!important}
+ .auth-page-shell.layout-corporate-banking .login-hero-brand{top:10px!important;left:12px!important;max-width:90%!important}
+ .auth-page-shell.layout-corporate-banking .login-hero-brand strong{font-size:17px!important}
+ .auth-page-shell.layout-corporate-banking .login-hero-brand small{font-size:10px!important}
+ .auth-page-shell.layout-corporate-banking .auth-card{grid-column:1/-1!important;grid-row:2!important;max-height:none!important;width:min(94%,470px)!important;margin:18px auto 28px!important;padding:26px!important}
+}

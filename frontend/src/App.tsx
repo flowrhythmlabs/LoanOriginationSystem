@@ -1703,7 +1703,7 @@ function App() {
   }
 
   return (
-    <div className="app-shell">
+    <div className="app-shell layout-corporate-banking">
       <header className="topbar">
         <div>
           <div className="brand">{branding.shortName}</div>

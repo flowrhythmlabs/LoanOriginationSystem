@@ -266,31 +266,26 @@ export function LoginPage({ branding, onAuthenticated }: { branding: PublicBrand
   };
 
   return (
-    <div className="auth-page-shell">
-      <div className="auth-glow auth-glow-left" />
-      <div className="auth-glow auth-glow-right" />
-      <aside className="auth-design-panel">
-        <div className="design-brand-row"><div className="design-brand-mark"><svg viewBox="0 0 48 48" aria-hidden="true"><path d="M6 18 30 3v10L16 22v21L6 37Z" fill="#1470b8"/><path d="m20 27 22-13v11L20 39Z" fill="#5ac8c5"/></svg></div><div><div className="design-brand">{branding.institutionName}</div><div className="design-tagline">{branding.tagline}</div></div></div>
-        <h1>Your Dreams<br/>Our Priority</h1>
-        <p>Quick, simple and secure loan solutions for a better tomorrow.</p>
-        <div className="design-feature"><span>ϟ</span><div><strong>Fast Processing</strong><small>Get decisions in minutes</small></div></div>
-        <div className="design-feature"><span>✓</span><div><strong>Secure &amp; Trusted</strong><small>Your data is always protected</small></div></div>
-        <div className="design-feature"><span>♙</span><div><strong>Easy Application</strong><small>Complete in a few simple steps</small></div></div>
-        <div className="design-illustration" aria-hidden="true"><img src="/login-illustration.png" alt="" /><div className="illustration-slogan">Build<br/>Your Future<br/>with Us</div></div>
+    <div className="auth-page-shell layout-corporate-banking">
+      <aside className="auth-design-panel" aria-label={`${branding.institutionName} welcome`}>
+        <div className="login-hero-photo" role="img" aria-label="Professional lending team" />
+        <div className="login-hero-overlay" />
+        <div className="login-hero-brand">
+          <span className="login-hero-emblem" aria-hidden="true">▥</span>
+          <div><strong>{branding.institutionName}</strong><small>{branding.tagline || 'Loan Origination System'}</small></div>
+        </div>
+        <div className="login-hero-quote"><span className="quote-symbol" aria-hidden="true">“</span><blockquote>Enabling responsible lending for sustainable growth.</blockquote><span className="quote-rule" /></div>
       </aside>
-      <div className="auth-card">
+      <main className="auth-card">
+        <div className="login-card-title"><span className="login-card-symbol" aria-hidden="true">{mode === 'admin' ? '♙' : '◉'}</span><div><h2>{mode === 'admin' ? 'Staff Login' : 'Welcome Back!'}</h2><p>{mode === 'admin' ? 'Access FineEdge LOS' : 'Continue your loan application securely'}</p></div></div>
         {demoMode && <div className="auth-demo-box" role="status">Demo environment</div>}
 
 
 
-        <div className="new-login-top"><span>◎ English⌄</span></div>
+
 
         {mode === 'user' && (
           <div className="auth-form">
-            <div className="new-login-welcome">
-              <div className="user-avatar" aria-label="User avatar"><img src="/approved-user-avatar.png" alt="Welcome back" /></div>
-              <div><h2>Welcome Back!</h2><p>Login to continue with your<br/>loan application.</p></div>
-            </div>
 
             <label className={`auth-field${mobileError ? ' has-error' : ''}`}>
               <span>Mobile Number <em className="login-required">*</em></span>
@@ -345,12 +340,6 @@ export function LoginPage({ branding, onAuthenticated }: { branding: PublicBrand
 
         {mode === 'admin' && (
           <div className="auth-form">
-            <div className="auth-form-header">
-              <div>
-                <h2>Staff Login</h2>
-                <p>Secure staff access with multi-factor authentication.</p>
-              </div>
-            </div>
 
 
             {!staffChallengeId && <label className="auth-field">
@@ -392,7 +381,7 @@ export function LoginPage({ branding, onAuthenticated }: { branding: PublicBrand
                 placeholder="6-digit MFA code" aria-label="Authenticator code" />
             </label>}
             <button type="button" className="primary auth-submit" onClick={staffChallengeId ? onStaffMfa : onAdminLogin} disabled={isSubmitting}>
-              {isSubmitting ? 'Verifying...' : staffChallengeId ? 'Verify MFA' : 'Continue'}
+              {isSubmitting ? 'Verifying...' : staffChallengeId ? 'Verify MFA' : 'Login'}
             </button>
             {staffChallengeId && <button type="button" className="secondary" disabled={isSubmitting} onClick={() => { setStaffChallengeId(''); setStaffMfaCode(''); setAdminState(prev => ({ ...prev, authError: '' })); }}>Back to password</button>}
             {adminState.authError && <div className="auth-error">{adminState.authError}</div>}
@@ -412,7 +401,7 @@ export function LoginPage({ branding, onAuthenticated }: { branding: PublicBrand
             Logout
           </button>
         )}
-      </div>
+      </main>
     </div>
   );
 }

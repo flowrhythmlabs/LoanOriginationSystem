@@ -726,3 +726,8 @@ label:has(> .required-asterisk) > .field-success {
   .inline-actions > span { width: 100%; text-align: center; }
 }
 
+/* Client-specific portrait and quote refinements */
+.new-login-welcome .user-avatar img {width:100%;height:100%;object-fit:cover;object-position:center 24%;display:block;}
+.design-illustration > img {max-width:45%;max-height:260px;object-fit:cover;object-position:center;}
+.illustration-slogan {font-size:clamp(1.2rem,2.1vw,2.1rem);line-height:1.25;font-weight:700;max-width:360px;}
+.illustration-slogan small {display:block;font-size:.55em;line-height:1.5;font-weight:400;margin-top:14px;}
