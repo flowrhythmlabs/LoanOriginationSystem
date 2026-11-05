@@ -1,13 +1,12 @@
 
-/* Corporate: persistent vertical workspace navigation and compact banking console */
-.app-shell{display:grid;grid-template-columns:258px minmax(0,1fr);min-height:100vh;background:#f0f3f8}
-.topbar{grid-column:1;grid-row:1;position:sticky;top:0;height:100vh;box-sizing:border-box;display:flex;flex-direction:column;align-items:stretch;justify-content:flex-start;gap:38px;padding:30px 18px;background:#142d50;border-right:1px solid #304866}
+/* Top navigation layout: full-width horizontal navbar — brand hard left, actions (Home / Application / Logout) hard right — with the content centered below it. */
+.app-shell{display:flex;flex-direction:column;min-height:100vh;background:#f0f3f8}
+.topbar{position:sticky;top:0;z-index:40;width:100%;box-sizing:border-box;display:flex;flex-direction:row;align-items:center;justify-content:space-between;gap:12px 28px;padding:14px 32px;background:#142d50;border-bottom:1px solid #304866}
 .topbar .brand{font-size:1.55rem}.topbar .subtitle{line-height:1.5}
-.topbar .nav{display:flex;flex-direction:column;align-items:stretch;gap:7px;width:100%}
-.topbar .nav a,.topbar .nav button{display:block;text-align:left;padding:12px 14px;border-radius:5px;line-height:1.4}
+.topbar .nav{display:flex;flex-direction:row;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:6px 10px;margin-left:auto}
+.topbar .nav a,.topbar .nav button{display:inline-flex;align-items:center;text-align:center;padding:8px 14px;border-radius:5px;line-height:1.4}
 .topbar .nav a:hover,.topbar .nav button:hover{background:#294a70}
-.page{grid-column:2;grid-row:1;width:100%;max-width:1600px;box-sizing:border-box;padding:38px 38px 70px;margin:0}
-.page:before{content:'OPERATIONS WORKSPACE';display:block;letter-spacing:.16em;color:#607a98;font-size:11px;font-weight:800;margin-bottom:24px}
+.page{width:100%;max-width:1260px;box-sizing:border-box;padding:32px 28px 70px;margin:0 auto}
 .dashboard-grid{grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
 .card,.form-card,.table-card{border-radius:4px!important;box-shadow:0 1px 3px #1c355011!important}
 th{background:#e3ebf5!important;text-transform:uppercase;font-size:11px;letter-spacing:.06em}
@@ -17,7 +16,7 @@ th{background:#e3ebf5!important;text-transform:uppercase;font-size:11px;letter-s
 
 
 /* Layout-specific overrides; business components and event handlers remain unchanged. */
-@media(max-width:900px){.app-shell{display:block!important}.topbar{position:static!important;width:auto!important;height:auto!important;min-height:0!important;flex-direction:row!important;padding:16px!important}.nav{flex-direction:row!important;flex-wrap:wrap!important}.page{margin:0 auto!important;padding:20px!important;width:auto!important}.auth-page-shell{display:grid!important;grid-template-columns:1fr!important;padding:20px!important}.auth-design-panel{display:none!important}.auth-card{grid-column:auto!important;max-width:700px!important;margin:auto!important}.dashboard-grid{grid-template-columns:repeat(2,minmax(0,1fr))!important}}
+@media(max-width:900px){.topbar{padding:12px 16px!important}.nav{flex-wrap:wrap!important}.page{margin:0 auto!important;padding:20px!important}.auth-page-shell{display:grid!important;grid-template-columns:1fr!important;padding:20px!important}.auth-design-panel{display:none!important}.auth-card{grid-column:auto!important;max-width:700px!important;margin:auto!important}.dashboard-grid{grid-template-columns:repeat(2,minmax(0,1fr))!important}}
 @media(max-width:520px){.dashboard-grid{grid-template-columns:1fr!important}}
 
 /* V4: actual full-viewport photographic login composition. No login logic changed. */
