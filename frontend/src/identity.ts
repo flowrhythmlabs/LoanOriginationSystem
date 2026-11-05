@@ -310,7 +310,7 @@ export function resolveIdentityExtraction(
   const extractedName = type === 'AADHAAR'
     ? aadhaarNameAboveDob(rawText) || cleanAadhaarName(parsedData.fullName) || cleanAadhaarName(parsedData.name)
     : parsedData.fullName?.trim() || parsedData.name?.trim() || cleanName(header) || existing.fullName?.trim();
-  const fullName = extractedName || 'Ayush Srivastava';
+  const fullName = extractedName || '';
   const fields = readIdentityFields({ fields: {
     ...parsedData, fullName, dateOfBirth: parsedData.dateOfBirth?.trim() || parsedData.dob?.trim()
   } });
