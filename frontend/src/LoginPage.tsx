@@ -26,7 +26,8 @@ type AdminLoginState = {
 };
 
 export function LoginPage({ branding, onAuthenticated }: { branding: PublicBranding; onAuthenticated: (session: AuthSession) => void }) {
-  const [mode] = useState<LoginMode>(initialMode);
+  // mode स्टेट को टॉगल करने की सुविधा दी गई है ताकि इमेज वाले टैब से मोड बदल सके
+  const [mode, setMode] = useState<LoginMode>(initialMode);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showAdminPassword, setShowAdminPassword] = useState(false);
   const [staffChallengeId, setStaffChallengeId] = useState('');
@@ -38,7 +39,13 @@ export function LoginPage({ branding, onAuthenticated }: { branding: PublicBrand
   const [resendSeconds, setResendSeconds] = useState(0);
   const otpRequestInFlight = useRef(false);
   const otpVerificationInFlight = useRef(false);
-  useEffect(() => { if (resendSeconds <= 0) return; const timer = window.setTimeout(() => setResendSeconds(value => value - 1), 1000); return () => window.clearTimeout(timer); }, [resendSeconds]);
+
+  useEffect(() => { 
+    if (resendSeconds <= 0) return; 
+    const timer = window.setTimeout(() => setResendSeconds(value => value - 1), 1000); 
+    return () => window.clearTimeout(timer); 
+  }, [resendSeconds]);
+
   const [userState, setUserState] = useState<UserLoginState>({
     mobile: '',
     otp: '',
@@ -49,6 +56,7 @@ export function LoginPage({ branding, onAuthenticated }: { branding: PublicBrand
     otpError: '',
     authError: ''
   });
+
   const [adminState, setAdminState] = useState<AdminLoginState>({
     username: '',
     password: '',
@@ -57,6 +65,7 @@ export function LoginPage({ branding, onAuthenticated }: { branding: PublicBrand
 
   const authSummary = useMemo(() => readStoredAuth(), []);
 
+  // 100% आपका मूल OTP सेंड लॉजिक
   const onUserSendOtp = async () => {
     if (otpRequestInFlight.current || isSubmitting || resendSeconds > 0) return;
     const mobile = userState.mobile;
@@ -147,6 +156,7 @@ export function LoginPage({ branding, onAuthenticated }: { branding: PublicBrand
     }
   };
 
+  // 100% आपका मूल OTP वेरिफिकेशन लॉजिक
   const onUserVerifyOtp = async () => {
     const mobile = userState.mobile;
 
@@ -189,7 +199,8 @@ export function LoginPage({ branding, onAuthenticated }: { branding: PublicBrand
       }
       const session: AuthSession = { authenticated: true, role: 'USER', mobile, accessToken: result.accessToken };
       setUserState(prev => ({ ...prev, otpLifecycle: 'verified', authError: '' }));
-      persistAuth(session); onAuthenticated(session);
+      persistAuth(session); 
+      onAuthenticated(session);
     } catch (error) {
       setUserState(prev => ({
         ...prev,
@@ -209,9 +220,10 @@ export function LoginPage({ branding, onAuthenticated }: { branding: PublicBrand
     if (userState.otpSent && /^\d{6}$/.test(userState.otp) && !isSubmitting && otpAttemptsRemaining > 0) {
       void onUserVerifyOtp();
     }
-    // OTP verification is intentionally triggered only when the six-digit value changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userState.otp, userState.otpSent]);
+
+  // 100% आपका मूल स्टाफ लॉगिन लॉजिक
   const onAdminLogin = async () => {
     const username = adminState.username.trim();
     if (!username || !adminState.password) {
@@ -255,10 +267,9 @@ export function LoginPage({ branding, onAuthenticated }: { branding: PublicBrand
       });
       const result = await response.json().catch(() => ({}));
       if (!response.ok || !result.accessToken) throw new Error(result.message || 'MFA verification failed.');
-      // The existing admin workspace uses ADMIN as its UI role; server permissions remain authoritative.
       const session: AuthSession = { authenticated: true, role: 'ADMIN', username: result.username || adminState.username.trim(), accessToken: result.accessToken };
-    persistAuth(session);
-    onAuthenticated(session);
+      persistAuth(session);
+      onAuthenticated(session);
     } catch (error) {
       setStaffMfaCode('');
       setAdminState(prev => ({ ...prev, authError: error instanceof Error ? error.message : 'MFA verification failed.' }));
@@ -267,151 +278,322 @@ export function LoginPage({ branding, onAuthenticated }: { branding: PublicBrand
 
   return (
     <div className="auth-page-shell">
-      <div className="auth-glow auth-glow-left" />
-      <div className="auth-glow auth-glow-right" />
+      {/* बायाँ पैनल - फोटो के अनुसार डार्क नेवी लेआउट */}
       <aside className="auth-design-panel">
-        <div className="design-brand-row"><div className="design-brand-mark"><svg viewBox="0 0 48 48" aria-hidden="true"><path d="M6 18 30 3v10L16 22v21L6 37Z" fill="#1470b8"/><path d="m20 27 22-13v11L20 39Z" fill="#5ac8c5"/></svg></div><div><div className="design-brand">{branding.institutionName}</div><div className="design-tagline">{branding.tagline}</div></div></div>
-        <h1>Your Dreams<br/>Our Priority</h1>
-        <p>Quick, simple and secure loan solutions for a better tomorrow.</p>
-        <div className="design-feature"><span>ϟ</span><div><strong>Fast Processing</strong><small>Get decisions in minutes</small></div></div>
-        <div className="design-feature"><span>✓</span><div><strong>Secure &amp; Trusted</strong><small>Your data is always protected</small></div></div>
-        <div className="design-feature"><span>♙</span><div><strong>Easy Application</strong><small>Complete in a few simple steps</small></div></div>
-        <div className="design-illustration" aria-hidden="true"><img src="/login-illustration.png" alt="" /><div className="illustration-slogan">Build<br/>Your Future<br/>with Us</div></div>
+        <div className="design-brand-row">
+          <div className="design-brand-mark">
+            <svg viewBox="0 0 48 48" aria-hidden="true">
+              <path d="M8 17L28 5V14L18 21V41L8 35V17Z" fill="#3B82F6" />
+              <path d="M20 27L40 15V24L20 37V27Z" fill="#38BDF8" />
+            </svg>
+          </div>
+          <div>
+            <div className="design-brand">{branding?.institutionName || 'Darshan Barter'}</div>
+            <div className="design-tagline">{branding?.tagline || 'Your Growth, Our Support.'}</div>
+          </div>
+        </div>
+
+        <div className="hero-text-block">
+          <h1>Your Dreams,<br/>Our Priority</h1>
+          <p>Quick, simple and secure loan solutions for a better tomorrow.</p>
+
+          <div className="features-pill-row">
+            <div className="feature-pill-item">
+              <span className="pill-icon">⚡</span>
+              <span>Fast Processing</span>
+            </div>
+            <div className="feature-pill-item">
+              <span className="pill-icon">🛡️</span>
+              <span>Secure &amp; Trusted</span>
+            </div>
+            <div className="feature-pill-item">
+              <span className="pill-icon">📱</span>
+              <span>Easy Application</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="design-illustration" aria-hidden="true">
+          <img src="/login-illustration.png" alt="Portal illustration" />
+        </div>
       </aside>
-      <div className="auth-card">
-        {demoMode && <div className="auth-demo-box" role="status">Demo environment</div>}
 
-
-
-        <div className="new-login-top"><span>◎ English⌄</span></div>
-
-        {mode === 'user' && (
-          <div className="auth-form">
-            <div className="new-login-welcome">
-              <div className="user-avatar" aria-label="User avatar"><img src="/approved-user-avatar.png" alt="Welcome back" /></div>
-              <div><h2>Welcome Back!</h2><p>Login to continue with your<br/>loan application.</p></div>
-            </div>
-
-            <label className={`auth-field${mobileError ? ' has-error' : ''}`}>
-              <span>Mobile Number <em className="login-required">*</em></span>
-              <input
-                type="tel"
-                value={userState.mobile}
-                aria-invalid={!!mobileError}
-                onChange={(event) => {
-                  const value = event.target.value;
-                  if (/\D/.test(value)) {
-                    setUserState((prev) => ({ ...prev, authError: 'Mobile number must contain digits only.', otpError: '' }));
-                    return;
-                  }
-                  setMobileError('');
-                  setUserState((prev) => ({ ...prev, mobile: value.slice(0, 10), otpSent: false, demoOtp: '', otpLifecycle: 'idle', otpStatus: '', otp: '', authError: '', otpError: '' })); setConsentAccepted(false);
-                }}
-                onPaste={(event) => {
-                  if (/\D/.test(event.clipboardData.getData('text'))) {
-                    event.preventDefault();
-                    setUserState((prev) => ({ ...prev, authError: 'Mobile number must contain digits only.', otpError: '' }));
-                  }
-                }}
-                placeholder="Enter 10-digit mobile number"
-                inputMode="numeric"
-                maxLength={10}
-                autoComplete="tel"
-              />
-              {mobileError && <span className="terms-error" role="alert">{mobileError}</span>}
-            </label>
-
-            {userState.otpSent && <label className="auth-field login-otp-field">
-              <span>OTP <em className="login-required">*</em></span>
-              <div className="otp-boxes" style={{display:'grid',gridTemplateColumns:'repeat(6,minmax(0,1fr))',gap:8}}>
-                {Array.from({length:6}, (_, index) => <input key={index} id={`otp-box-${index}`} type="text" inputMode="numeric" maxLength={index === 0 ? 6 : 1} disabled={!userState.otpSent || isSubmitting} autoComplete={index === 0 ? 'one-time-code' : 'off'} aria-label={`OTP digit ${index + 1}`} value={userState.otp[index] || ''} onChange={event => { const raw = event.target.value.replace(/\D/g,''); if (raw.length > 1) { setUserState(prev => ({...prev, otp: raw.slice(0,6), authError:''})); document.getElementById(`otp-box-${Math.min(raw.length,6)-1}`)?.focus(); return; } const digits = userState.otp.padEnd(6,' ').split(''); digits[index] = raw || ' '; const next = digits.join('').trimEnd().replace(/ /g,''); setUserState(prev => ({...prev, otp: next, authError:''})); if (raw && index < 5) document.getElementById(`otp-box-${index+1}`)?.focus(); }} onPaste={event => { const digits = event.clipboardData.getData('text').replace(/\D/g,'').slice(0,6); if (digits) { event.preventDefault(); setUserState(prev => ({...prev, otp:digits, authError:''})); document.getElementById(`otp-box-${Math.min(digits.length,6)-1}`)?.focus(); } }} />)}
-                </div>
-              <div className="login-otp-help"><span>{userState.otpSent ? 'Enter the 6-digit OTP received by SMS; it verifies automatically when complete.' : 'Enter your mobile number and select Continue to receive an OTP by SMS.'}</span>{userState.otpSent && <button type="button" className="login-resend" onClick={onUserSendOtp} disabled={isSubmitting || resendSeconds > 0}>{resendSeconds > 0 ? `Resend in ${resendSeconds}s` : 'Resend OTP'}</button>}</div>
-              {userState.otpStatus && <div role="status">{userState.otpStatus}</div>}
-            </label>}
-            {userState.demoOtp && demoMode && <div className="auth-demo-box"><span>Demo OTP</span><strong>{userState.demoOtp}</strong></div>}
-            <label className={`auth-field auth-consent${termsError ? ' has-error' : ''}`}><input type="checkbox" checked={consentAccepted} disabled={userState.otpSent} aria-invalid={termsError} onChange={e => { setConsentAccepted(e.target.checked); if (e.target.checked) setTermsError(false); }} /><span>I agree to the <a href="/terms.html" target="_blank" rel="noreferrer">Terms &amp; Conditions</a> and <a href="/privacy.html" target="_blank" rel="noreferrer">Privacy Policy</a>.</span></label>
-            {termsError && <div id="terms-error" className="terms-error" role="alert">Please select Terms &amp; Conditions to continue.</div>}
-            <button type="button" className="primary auth-submit" onClick={userState.otpSent ? onUserVerifyOtp : onUserSendOtp} disabled={isSubmitting || (userState.otpSent && userState.otp.length !== 6) || (!userState.otpSent && resendSeconds > 0)}>
-              {isSubmitting
-                ? (userState.otpLifecycle === 'sending' ? 'Sending OTP…' : 'Verifying...')
-                : (!userState.otpSent && resendSeconds > 0 ? `Please wait (${resendSeconds}s)` : (userState.otpSent ? 'Login' : 'Continue'))}
-                </button>
-
-            {userState.otpError && <div className="auth-error">{userState.otpError}</div>}
-            {userState.authError && <div className="auth-error">{userState.authError}</div>}
-          </div>
-        )}
-
-        {mode === 'admin' && (
-          <div className="auth-form">
-            <div className="auth-form-header">
-              <div>
-                <h2>Staff Login</h2>
-                <p>Secure staff access with multi-factor authentication.</p>
-              </div>
-            </div>
-
-
-            {!staffChallengeId && <label className="auth-field">
-              <span>Username</span>
-              <input
-                type="text"
-                value={adminState.username}
-                onChange={(event) => setAdminState((prev) => ({ ...prev, username: event.target.value, authError: '' }))}
-                placeholder="Enter staff username"
-                autoComplete="username"
-              />
-            </label>}
-
-            {!staffChallengeId && <label className="auth-field">
-              <span>Password</span>
-              <div className="password-wrap">
-                <input
-                  type={showAdminPassword ? 'text' : 'password'}
-                  value={adminState.password}
-                  onChange={(event) => setAdminState((prev) => ({ ...prev, password: event.target.value, authError: '' }))}
-                  placeholder="Enter admin password"
-                  autoComplete="current-password"
-                />
-                <button
-                  type="button"
-                  className="password-toggle"
-                  onClick={() => setShowAdminPassword((value) => !value)}
-                  aria-label={showAdminPassword ? 'Hide password' : 'Show password'}
-                >
-                  {showAdminPassword ? 'Hide' : 'Show'}
-                </button>
-              </div>
-            </label>}
-
-            {staffChallengeId && <label className="auth-field">
-              <span>Authenticator code</span>
-              <input type="text" inputMode="numeric" autoComplete="one-time-code" maxLength={6}
-                value={staffMfaCode} onChange={e => setStaffMfaCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                placeholder="6-digit MFA code" aria-label="Authenticator code" />
-            </label>}
-            <button type="button" className="primary auth-submit" onClick={staffChallengeId ? onStaffMfa : onAdminLogin} disabled={isSubmitting}>
-              {isSubmitting ? 'Verifying...' : staffChallengeId ? 'Verify MFA' : 'Continue'}
+      {/* दायाँ पैनल - फोटो के अनुसार स्वच्छ व्हाइट कार्ड */}
+      <div className="auth-card-container">
+        <div className="auth-card">
+          {/* Customer / Staff स्विच टैब्स */}
+          <div className="mode-tab-group">
+            <button
+              type="button"
+              className={`mode-tab ${mode === 'user' ? 'active' : ''}`}
+              onClick={() => { setMode('user'); setStaffChallengeId(''); }}
+            >
+              Customer Login
             </button>
-            {staffChallengeId && <button type="button" className="secondary" disabled={isSubmitting} onClick={() => { setStaffChallengeId(''); setStaffMfaCode(''); setAdminState(prev => ({ ...prev, authError: '' })); }}>Back to password</button>}
-            {adminState.authError && <div className="auth-error">{adminState.authError}</div>}
+            <button
+              type="button"
+              className={`mode-tab ${mode === 'admin' ? 'active' : ''}`}
+              onClick={() => setMode('admin')}
+            >
+              Staff Login
+            </button>
           </div>
-        )}
-        <div style={{textAlign:'center',marginTop:18,fontSize:12}}><a href={mode === 'user' ? '/staff/login' : '/'}>{mode === 'user' ? 'Staff login' : 'Back to applicant login'}</a></div>
 
-        {authSummary && (
-          <button
-            type="button"
-            className="secondary auth-logout-inline"
-            onClick={() => {
-              clearAuth();
-              window.location.reload();
-            }}
-          >
-            Logout
-          </button>
-        )}
+          <div className="auth-card-header">
+            <h2>Welcome Back!</h2>
+            <p>
+              {mode === 'user' 
+                ? 'Login to continue with your loan application.' 
+                : 'Secure staff access with multi-factor authentication.'}
+            </p>
+          </div>
+
+          {demoMode && <div className="auth-demo-box" role="status">Demo environment</div>}
+
+          {/* CUSTOMER LOGIN FORM */}
+          {mode === 'user' && (
+            <div className="auth-form">
+              <label className={`auth-field${mobileError ? ' has-error' : ''}`}>
+                <span>Mobile Number</span>
+                <input
+                  type="tel"
+                  value={userState.mobile}
+                  aria-invalid={!!mobileError}
+                  disabled={userState.otpSent || isSubmitting}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    if (/\D/.test(value)) {
+                      setUserState((prev) => ({ ...prev, authError: 'Mobile number must contain digits only.', otpError: '' }));
+                      return;
+                    }
+                    setMobileError('');
+                    setUserState((prev) => ({ ...prev, mobile: value.slice(0, 10), otpSent: false, demoOtp: '', otpLifecycle: 'idle', otpStatus: '', otp: '', authError: '', otpError: '' })); 
+                    setConsentAccepted(false);
+                  }}
+                  onPaste={(event) => {
+                    if (/\D/.test(event.clipboardData.getData('text'))) {
+                      event.preventDefault();
+                      setUserState((prev) => ({ ...prev, authError: 'Mobile number must contain digits only.', otpError: '' }));
+                    }
+                  }}
+                  placeholder="Enter 10-digit mobile number"
+                  inputMode="numeric"
+                  maxLength={10}
+                  autoComplete="tel"
+                />
+                {mobileError && <span className="terms-error" role="alert">{mobileError}</span>}
+              </label>
+
+              {userState.otpSent && (
+                <label className="auth-field login-otp-field">
+                  <div className="otp-label-split">
+                    <span>OTP <em className="login-required">*</em></span>
+                    <button
+                      type="button"
+                      className="change-mobile-link"
+                      onClick={() => setUserState(prev => ({ ...prev, otpSent: false, otp: '', authError: '', otpError: '' }))}
+                    >
+                      Change Number
+                    </button>
+                  </div>
+                  <div className="otp-boxes" style={{display:'grid', gridTemplateColumns:'repeat(6,minmax(0,1fr))', gap:8}}>
+                    {Array.from({length:6}, (_, index) => (
+                      <input 
+                        key={index} 
+                        id={`otp-box-${index}`} 
+                        type="text" 
+                        inputMode="numeric" 
+                        maxLength={index === 0 ? 6 : 1} 
+                        disabled={!userState.otpSent || isSubmitting} 
+                        autoComplete={index === 0 ? 'one-time-code' : 'off'} 
+                        aria-label={`OTP digit ${index + 1}`} 
+                        value={userState.otp[index] || ''} 
+                        onChange={event => { 
+                          const raw = event.target.value.replace(/\D/g,''); 
+                          if (raw.length > 1) { 
+                            setUserState(prev => ({...prev, otp: raw.slice(0,6), authError:''})); 
+                            document.getElementById(`otp-box-${Math.min(raw.length,6)-1}`)?.focus(); 
+                            return; 
+                          } 
+                          const digits = userState.otp.padEnd(6,' ').split(''); 
+                          digits[index] = raw || ' '; 
+                          const next = digits.join('').trimEnd().replace(/ /g,''); 
+                          setUserState(prev => ({...prev, otp: next, authError:''})); 
+                          if (raw && index < 5) document.getElementById(`otp-box-${index+1}`)?.focus(); 
+                        }} 
+                        onPaste={event => { 
+                          const digits = event.clipboardData.getData('text').replace(/\D/g,'').slice(0,6); 
+                          if (digits) { 
+                            event.preventDefault(); 
+                            setUserState(prev => ({...prev, otp:digits, authError:''})); 
+                            document.getElementById(`otp-box-${Math.min(digits.length,6)-1}`)?.focus(); 
+                          } 
+                        }} 
+                      />
+                    ))}
+                  </div>
+                  <div className="login-otp-help">
+                    <span>{userState.otpSent ? 'Enter 6-digit OTP' : 'SMS OTP will be sent.'}</span>
+                    {userState.otpSent && (
+                      <button type="button" className="login-resend" onClick={onUserSendOtp} disabled={isSubmitting || resendSeconds > 0}>
+                        {resendSeconds > 0 ? `Resend in ${resendSeconds}s` : 'Resend OTP'}
+                      </button>
+                    )}
+                  </div>
+                  {userState.otpStatus && <div className="otp-feedback-msg" role="status">{userState.otpStatus}</div>}
+                </label>
+              )}
+
+              {userState.demoOtp && demoMode && (
+                <div className="auth-demo-box"><span>Demo OTP</span><strong>{userState.demoOtp}</strong></div>
+              )}
+
+              <label className={`auth-field auth-consent${termsError ? ' has-error' : ''}`}>
+                <input 
+                  type="checkbox" 
+                  checked={consentAccepted} 
+                  disabled={userState.otpSent} 
+                  aria-invalid={termsError} 
+                  onChange={e => { 
+                    setConsentAccepted(e.target.checked); 
+                    if (e.target.checked) setTermsError(false); 
+                  }} 
+                />
+                <span>I agree to the <a href="/terms.html" target="_blank" rel="noreferrer">Terms &amp; Conditions</a> and <a href="/privacy.html" target="_blank" rel="noreferrer">Privacy Policy</a>.</span>
+              </label>
+              {termsError && <div id="terms-error" className="terms-error" role="alert">Please select Terms &amp; Conditions to continue.</div>}
+
+              <button 
+                type="button" 
+                className="primary auth-submit" 
+                onClick={userState.otpSent ? onUserVerifyOtp : onUserSendOtp} 
+                disabled={isSubmitting || (userState.otpSent && userState.otp.length !== 6) || (!userState.otpSent && resendSeconds > 0)}
+              >
+                {isSubmitting
+                  ? (userState.otpLifecycle === 'sending' ? 'Sending OTP…' : 'Verifying...')
+                  : (!userState.otpSent && resendSeconds > 0 ? `Please wait (${resendSeconds}s)` : (userState.otpSent ? 'Verify OTP' : 'Request OTP'))}
+              </button>
+
+              {userState.otpError && <div className="auth-error">{userState.otpError}</div>}
+              {userState.authError && <div className="auth-error">{userState.authError}</div>}
+
+              <div className="auth-helper-link">
+                Are you an employee?{' '}
+                <button type="button" className="text-link-btn" onClick={() => setMode('admin')}>
+                  Login to Staff Portal
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* STAFF LOGIN FORM */}
+          {mode === 'admin' && (
+            <div className="auth-form">
+              {!staffChallengeId && (
+                <label className="auth-field">
+                  <span>Username</span>
+                  <input
+                    type="text"
+                    value={adminState.username}
+                    onChange={(event) => setAdminState((prev) => ({ ...prev, username: event.target.value, authError: '' }))}
+                    placeholder="Enter staff username"
+                    autoComplete="username"
+                  />
+                </label>
+              )}
+
+              {!staffChallengeId && (
+                <label className="auth-field">
+                  <span>Password</span>
+                  <div className="password-wrap">
+                    <input
+                      type={showAdminPassword ? 'text' : 'password'}
+                      value={adminState.password}
+                      onChange={(event) => setAdminState((prev) => ({ ...prev, password: event.target.value, authError: '' }))}
+                      placeholder="Enter admin password"
+                      autoComplete="current-password"
+                    />
+                    <button
+                      type="button"
+                      className="password-toggle"
+                      onClick={() => setShowAdminPassword((value) => !value)}
+                      aria-label={showAdminPassword ? 'Hide password' : 'Show password'}
+                    >
+                      {showAdminPassword ? 'Hide' : 'Show'}
+                    </button>
+                  </div>
+                </label>
+              )}
+
+              {staffChallengeId && (
+                <label className="auth-field">
+                  <span>Authenticator code</span>
+                  <input 
+                    type="text" 
+                    inputMode="numeric" 
+                    autoComplete="one-time-code" 
+                    maxLength={6}
+                    value={staffMfaCode} 
+                    onChange={e => setStaffMfaCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                    placeholder="6-digit MFA code" 
+                    aria-label="Authenticator code" 
+                  />
+                </label>
+              )}
+
+              <button 
+                type="button" 
+                className="primary auth-submit" 
+                onClick={staffChallengeId ? onStaffMfa : onAdminLogin} 
+                disabled={isSubmitting}
+              >
+                {isSubmitting ? 'Verifying...' : staffChallengeId ? 'Verify MFA' : 'Continue'}
+              </button>
+
+              {staffChallengeId && (
+                <button 
+                  type="button" 
+                  className="secondary auth-back-btn" 
+                  disabled={isSubmitting} 
+                  onClick={() => { setStaffChallengeId(''); setStaffMfaCode(''); setAdminState(prev => ({ ...prev, authError: '' })); }}
+                >
+                  Back to password
+                </button>
+              )}
+
+              {adminState.authError && <div className="auth-error">{adminState.authError}</div>}
+
+              <div className="auth-helper-link">
+                Applicant login?{' '}
+                <button type="button" className="text-link-btn" onClick={() => setMode('user')}>
+                  Customer Login
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Safe & Secure 256-bit Encryption Badge */}
+          <div className="auth-safe-badge">
+            <span className="safe-icon">🛡️</span>
+            <div>
+              <strong>Safe &amp; Secure</strong>
+              <small>256-bit encryption</small>
+            </div>
+          </div>
+
+          {authSummary && (
+            <button
+              type="button"
+              className="secondary auth-logout-inline"
+              onClick={() => {
+                clearAuth();
+                window.location.reload();
+              }}
+            >
+              Logout
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );

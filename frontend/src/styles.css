@@ -726,3 +726,378 @@ label:has(> .required-asterisk) > .field-success {
   .inline-actions > span { width: 100%; text-align: center; }
 }
 
+/* =========================================================
+   AUTHENTIC SPLIT SCREEN LAYOUT (Photo Exact Overrides)
+   ========================================================= */
+
+/* 1. Main 50/50 Screen Layout */
+.auth-page-shell {
+  display: grid !important;
+  grid-template-columns: 1fr 1fr !important;
+  min-height: 100vh !important;
+  width: 100% !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  background-color: #f8fafc !important;
+  overflow: hidden !important;
+}
+
+.auth-glow {
+  display: none !important;
+}
+
+/* 2. Left Navy Panel */
+.auth-design-panel {
+  background: radial-gradient(circle at 80% 85%, #152d59 0%, #081124 55%, #050b18 100%) !important;
+  padding: clamp(36px, 5vw, 68px) !important;
+  display: flex !important;
+  flex-direction: column !important;
+  justify-content: space-between !important;
+  position: relative !important;
+  overflow: hidden !important;
+  max-width: 100% !important;
+  color: #ffffff !important;
+}
+
+.auth-design-panel .design-brand-row {
+  display: flex !important;
+  align-items: center !important;
+  gap: 14px !important;
+  z-index: 2 !important;
+}
+
+.auth-design-panel .design-brand-mark {
+  width: 44px !important;
+  height: 44px !important;
+  background: transparent !important;
+  margin: 0 !important;
+  display: flex !important;
+  align-items: center !important;
+}
+
+.auth-design-panel .design-brand-mark svg {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.auth-design-panel .design-brand {
+  font-size: 1.65rem !important;
+  font-weight: 800 !important;
+  color: #ffffff !important;
+  line-height: 1.15 !important;
+}
+
+.auth-design-panel .design-tagline {
+  margin-left: 0 !important;
+  font-size: 0.88rem !important;
+  color: #94a3b8 !important;
+}
+
+.hero-text-block {
+  margin-top: clamp(20px, 4vh, 40px) !important;
+  z-index: 2 !important;
+}
+
+.auth-design-panel h1 {
+  font-size: clamp(2.6rem, 4.2vw, 4rem) !important;
+  font-weight: 800 !important;
+  line-height: 1.12 !important;
+  letter-spacing: -0.03em !important;
+  color: #ffffff !important;
+  margin: 0 0 16px 0 !important;
+}
+
+.auth-design-panel > .hero-text-block > p {
+  font-size: clamp(1rem, 1.25vw, 1.2rem) !important;
+  color: #94a3b8 !important;
+  max-width: 420px !important;
+  line-height: 1.5 !important;
+  margin-bottom: 30px !important;
+}
+
+/* Feature Pills (Image Exact) */
+.features-pill-row {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  gap: 12px !important;
+  max-width: 480px !important;
+}
+
+.feature-pill-item {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+  padding: 8px 18px !important;
+  background: rgba(255, 255, 255, 0.08) !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  border-radius: 9999px !important;
+  backdrop-filter: blur(10px) !important;
+  color: #f1f5f9 !important;
+  font-size: 0.95rem !important;
+  font-weight: 600 !important;
+}
+
+.pill-icon {
+  font-size: 1.1rem !important;
+}
+
+/* Bottom 3D Illustration */
+.auth-design-panel .design-illustration {
+  margin-top: auto !important;
+  display: flex !important;
+  align-items: flex-end !important;
+  justify-content: flex-start !important;
+  height: 280px !important;
+  z-index: 2 !important;
+}
+
+.auth-design-panel .design-illustration img {
+  max-width: 320px !important;
+  width: 85% !important;
+  height: auto !important;
+  object-fit: contain !important;
+  filter: drop-shadow(0 15px 25px rgba(0, 0, 0, 0.45)) !important;
+}
+
+/* 3. Right White Panel Wrapper */
+.auth-card-container {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  padding: clamp(24px, 4vw, 48px) !important;
+  background-color: #f8fafc !important;
+}
+
+.auth-card {
+  width: 100% !important;
+  max-width: 440px !important;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  padding: 0 !important;
+  margin: 0 !important;
+}
+
+/* Top Mode Switch Bar (Customer Login | Staff Login) */
+.mode-tab-group {
+  display: flex !important;
+  background-color: #e5ebf4 !important;
+  padding: 4px !important;
+  border-radius: 12px !important;
+  margin-bottom: 32px !important;
+}
+
+.mode-tab {
+  flex: 1 !important;
+  padding: 10px 18px !important;
+  font-size: 0.95rem !important;
+  font-weight: 600 !important;
+  border: none !important;
+  background: transparent !important;
+  color: #64748b !important;
+  border-radius: 9px !important;
+  cursor: pointer !important;
+  transition: all 0.2s ease !important;
+}
+
+.mode-tab.active {
+  background-color: #0b1528 !important;
+  color: #ffffff !important;
+  box-shadow: 0 4px 10px rgba(11, 21, 40, 0.2) !important;
+}
+
+/* Header Text */
+.auth-card-header h2 {
+  font-size: 2.15rem !important;
+  font-weight: 800 !important;
+  color: #0b1528 !important;
+  letter-spacing: -0.03em !important;
+  margin: 0 0 6px 0 !important;
+}
+
+.auth-card-header p {
+  font-size: 0.95rem !important;
+  color: #64748b !important;
+  line-height: 1.4 !important;
+  margin: 0 0 24px 0 !important;
+}
+
+/* Input Fields (Soft Grey/Blue Fill) */
+.auth-field span {
+  font-size: 0.88rem !important;
+  font-weight: 600 !important;
+  color: #1e293b !important;
+  margin-bottom: 6px !important;
+}
+
+.auth-field input {
+  width: 100% !important;
+  height: 50px !important;
+  padding: 0 16px !important;
+  background-color: #e9eff7 !important;
+  border: 1px solid #d8e2ee !important;
+  border-radius: 10px !important;
+  font-size: 0.95rem !important;
+  color: #0f172a !important;
+  outline: none !important;
+}
+
+.auth-field input:focus {
+  background-color: #ffffff !important;
+  border-color: #1754db !important;
+  box-shadow: 0 0 0 3px rgba(23, 84, 219, 0.12) !important;
+}
+
+/* Checkbox Row */
+.auth-consent {
+  margin: 8px 0 22px !important;
+  gap: 10px !important;
+  color: #475569 !important;
+  font-size: 0.86rem !important;
+}
+
+.auth-consent input[type="checkbox"] {
+  width: 17px !important;
+  height: 17px !important;
+  accent-color: #1754db !important;
+  cursor: pointer !important;
+}
+
+.auth-consent a {
+  color: #1754db !important;
+  text-decoration: underline !important;
+}
+
+/* Primary Action Button (Blue Pill Button) */
+.auth-submit {
+  width: 100% !important;
+  height: 52px !important;
+  background: #1754db !important;
+  color: #ffffff !important;
+  border: none !important;
+  border-radius: 10px !important;
+  font-size: 1.02rem !important;
+  font-weight: 700 !important;
+  cursor: pointer !important;
+  transition: background-color 0.2s ease !important;
+}
+
+.auth-submit:hover:not(:disabled) {
+  background: #1243b3 !important;
+}
+
+.auth-submit:disabled {
+  opacity: 0.65 !important;
+  cursor: not-allowed !important;
+}
+
+/* Bottom Staff Portal Link */
+.auth-helper-link {
+  text-align: center !important;
+  font-size: 0.9rem !important;
+  color: #475569 !important;
+  margin-top: 20px !important;
+}
+
+.text-link-btn {
+  background: none !important;
+  border: none !important;
+  color: #0b1528 !important;
+  font-weight: 700 !important;
+  text-decoration: underline !important;
+  cursor: pointer !important;
+  font-size: inherit !important;
+}
+
+/* Trust Badge (Safe & Secure) */
+.auth-safe-badge {
+  margin: 32px auto 0 !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 12px !important;
+  background-color: #eaf0f7 !important;
+  border: 1px solid #d5e0ee !important;
+  border-radius: 10px !important;
+  padding: 8px 18px !important;
+  width: fit-content !important;
+}
+
+.safe-icon {
+  font-size: 1.35rem !important;
+}
+
+.auth-safe-badge strong {
+  display: block !important;
+  font-size: 0.8rem !important;
+  font-weight: 700 !important;
+  color: #0f172a !important;
+}
+
+.auth-safe-badge small {
+  display: block !important;
+  font-size: 0.7rem !important;
+  color: #64748b !important;
+}
+
+/* OTP Digit Boxes */
+.otp-label-split {
+  display: flex !important;
+  justify-content: space-between !important;
+  align-items: center !important;
+}
+
+.change-mobile-link {
+  background: none !important;
+  border: none !important;
+  color: #1754db !important;
+  font-size: 0.8rem !important;
+  font-weight: 600 !important;
+  cursor: pointer !important;
+}
+
+.login-otp-field .otp-boxes input {
+  height: 52px !important;
+  background-color: #e9eff7 !important;
+  border: 1px solid #d8e2ee !important;
+  border-radius: 10px !important;
+  font-size: 1.3rem !important;
+  font-weight: 700 !important;
+  text-align: center !important;
+}
+
+.login-otp-field .otp-boxes input:focus {
+  background-color: #ffffff !important;
+  border-color: #1754db !important;
+}
+
+.otp-feedback-msg {
+  font-size: 0.8rem !important;
+  color: #166534 !important;
+  margin-top: 6px !important;
+}
+
+.auth-back-btn {
+  width: 100% !important;
+  height: 44px !important;
+  margin-top: 10px !important;
+  background: #f1f5f9 !important;
+  border: 1px solid #cbd5e1 !important;
+  border-radius: 10px !important;
+  font-weight: 600 !important;
+  cursor: pointer !important;
+}
+
+/* Responsive Handling */
+@media (max-width: 980px) {
+  .auth-page-shell {
+    grid-template-columns: 1fr !important;
+  }
+  .auth-design-panel {
+    display: none !important;
+  }
+  .auth-card-container {
+    padding: 32px 20px !important;
+    min-height: 100vh !important;
+  }
+}
