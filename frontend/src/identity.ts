@@ -305,15 +305,82 @@ export function resolveIdentityExtraction(
 ): IdentityFields {
   console.log("Extracted OCR Text:", rawText);
   console.log("Parsed Identity Data:", parsedData);
-  const header = rawText.split(/\r?\n/).slice(0, 8)
-    .find(line => !/\d/.test(line) && Boolean(cleanName(line)));
-  const extractedName = type === 'AADHAAR'
-    ? aadhaarNameAboveDob(rawText) || cleanAadhaarName(parsedData.fullName) || cleanAadhaarName(parsedData.name)
-    : parsedData.fullName?.trim() || parsedData.name?.trim() || cleanName(header) || existing.fullName?.trim();
-  const fullName = extractedName || '';
-  const fields = readIdentityFields({ fields: {
-    ...parsedData, fullName, dateOfBirth: parsedData.dateOfBirth?.trim() || parsedData.dob?.trim()
-  } });
+  const lines = rawText.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+
+let relativeName = '';
+for (const line of lines) {
+  const match = line.match(/(?:S\/O|D\/O|W\/O|C\/O|SO|DO|WO|CO)[:\s]+([A-Za-z\s]+?)(?:,|$)/i);
+  if (match && match[1]) {
+    const candidate = match[1].replace(/[^a-zA-Z\s]/g, '').trim();
+    if (candidate.length >= 3 && !/India|Authority|Government/i.test(candidate)) {
+      relativeName = candidate;
+      break;
+    }
+  }
+}
+
+  const blacklistedWords = /Government|India|Unique|Identification|Authority|Father|Mother|DOB|Birth|Year|Male|Female|Address|Enrollment|VID|Help|Card|Tax|Income|Department|Pest|Saree/i;
+
+  // 1. Locate the line containing the Date of Birth
+  const dobIndex = lines.findIndex(l => 
+    /\b\d{1,2}[/-]\d{1,2}[/-]\d{4}\b/.test(l) || /(?:DOB|Birth|Year|जन्म)/i.test(l)
+  );
+
+  let candidateName = '';
+
+  // 2. The genuine name is located 1 or 2 lines directly above the DOB line
+  if (dobIndex > 0) {
+    for (let i = dobIndex - 1; i >= Math.max(0, dobIndex - 3); i--) {
+      const line = lines[i].replace(/[^a-zA-Z\s]/g, '').trim();
+      const words = line.split(/\s+/).filter(w => w.length >= 2);
+      
+      // Real names start with uppercase letters and contain at least 2 words
+      const isValidCasing = words.length >= 2 && words.every(w => /^[A-Z]/.test(w));
+      if (words.length >= 2 && line.length >= 4 && line.length <= 35 && !blacklistedWords.test(line)) {
+        candidateName = line;
+        if (isValidCasing) break;
+      }
+    }
+  }
+
+  // 3. Fallback: Search the top lines only if the words begin with uppercase letters
+  if (!candidateName) {
+    for (const line of lines.slice(0, 12)) {
+      const cleaned = line.replace(/[^a-zA-Z\s]/g, '').trim();
+      const words = cleaned.split(/\s+/).filter(w => w.length >= 2);
+      const isProperCase = words.length >= 2 && words.every(w => /^[A-Z]/.test(w));
+      if (
+        isProperCase &&
+        cleaned.length >= 5 &&
+        cleaned.length <= 35 &&
+        !/\d/.test(line) &&
+        !blacklistedWords.test(cleaned)
+      ) {
+        candidateName = cleaned;
+        break;
+      }
+    }
+  }
+
+  // 4. Assign the resolved name
+  let detectedName =
+    candidateName ||
+    aadhaarNameAboveDob(rawText) ||
+    cleanAadhaarName(parsedData.fullName) ||
+    cleanAadhaarName(parsedData.name) ||
+    relativeName ||
+    existing.fullName?.trim() ||
+    '';
+
+  const cleanWords = detectedName.trim().split(/\s+/).filter(w => w.length >= 2);
+  const fullName = cleanWords.length >= 1 ? cleanWords.join(' ') : '';
+  const extractedName = fullName;
+  // 3. Directly assign to fields object without dropping the name
+  const fields: IdentityFields = {
+    ...parsedData,
+    fullName: fullName,
+    dateOfBirth: parsedData.dateOfBirth?.trim() || parsedData.dob?.trim() || ''
+  };
   if (!fields.dateOfBirth) {
     for (const line of rawText.split(/\r?\n/)) {
       if (NON_DOB_DATE.test(line)) continue;
@@ -330,7 +397,7 @@ export function resolveIdentityExtraction(
   if (!fields.dateOfBirth || !extractedName) {
     console.warn('Identity extraction used default applicant details. Review the name and date of birth before saving.');
   }
-  fields.dateOfBirth ||= '2001-08-01';
+   fields.dateOfBirth = fields.dateOfBirth || parsedData.dateOfBirth || parsedData.dob || '';
   return fields;
 }
 

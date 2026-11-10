@@ -513,10 +513,16 @@ function App() {
       }
       if (controller.signal.aborted && !timedOut) return;
       setApplicant(previous => {
-        const next = { ...previous, additionalDetails: { ...previous.additionalDetails } };
-        if (fields.fullName && previous.fullName === applicantAtFetch.fullName) {
-          next.fullName = fields.fullName;
-        }
+          const next = { ...previous, additionalDetails: { ...previous.additionalDetails } };
+          const nameFromFields = (fields as any)?.fullName || (fields as any)?.name || (fields as any)?.applicantName || '';
+          if (nameFromFields) {
+            next.fullName = nameFromFields;
+          }
+
+          if (fields.dateOfBirth && previous.dateOfBirth === applicantAtFetch.dateOfBirth) {
+            next.dateOfBirth = fields.dateOfBirth;
+            next.additionalDetails.age = calculateAge(next.dateOfBirth);
+          }
         if (fields.dateOfBirth && previous.dateOfBirth === applicantAtFetch.dateOfBirth) {
           next.dateOfBirth = fields.dateOfBirth;
           next.additionalDetails.age = calculateAge(next.dateOfBirth);
@@ -2178,7 +2184,7 @@ function App() {
             </label>
             <label>Preferred Tenure <span className="required-asterisk">*</span><select value={loanDetails.preferredTenure} onChange={e => setLoanDetails({...loanDetails, preferredTenure: Number(e.target.value)})}>{[6,12,18,24,36,48,60,84,120,180,240,300,360].filter(months => (!pricingPolicy.minTenure || months >= pricingPolicy.minTenure) && (!pricingPolicy.maxTenure || months <= pricingPolicy.maxTenure)).map(months => <option key={months} value={months}>{months} months ({(months/12).toFixed(1)} years)</option>)}</select></label>
             <label>Your rate (% p.a.) <input value={formatInterestRate(effectiveInterestRate)} readOnly aria-readonly="true" title="Calculated from the product rate card and applicable credit policy. Personal Loans use 10.5% while pricing is pending or returns zero. Rate exceptions require approval." /></label>
-            <label>Purpose of Loan<select value={(['Marriage','Illness','Higher Education','Home Purchase','Business','Vehicle Purchase','Debt Consolidation','Other'].includes(loanDetails.purposeOfLoan) ? loanDetails.purposeOfLoan : loanDetails.purposeOfLoan ? 'Other' : '')} onChange={e => setLoanDetails({...loanDetails, purposeOfLoan: e.target.value === 'Other' ? '' : e.target.value})}><option value="">Select purpose</option><option>Marriage</option><option>Illness</option><option>Higher Education</option><option>Home Purchase</option><option>Business</option><option>Vehicle Purchase</option><option>Debt Consolidation</option><option>Other</option></select></label><label>Purpose remark / Other purpose (optional)<input value={loanDetails.purposeOfLoan} placeholder="Describe the purpose if not listed" onChange={e => setLoanDetails({...loanDetails, purposeOfLoan: e.target.value})} /></label>
+            <label>Purpose of Loan <span className="required-asterisk">*</span><select value={(['Marriage','Illness','Higher Education','Home Purchase','Business','Vehicle Purchase','Debt Consolidation','Other'].includes(loanDetails.purposeOfLoan) ? loanDetails.purposeOfLoan : loanDetails.purposeOfLoan ? 'Other' : '')} onChange={e => setLoanDetails({...loanDetails, purposeOfLoan: e.target.value === 'Other' ? '' : e.target.value})}><option value="">Select purpose</option><option>Marriage</option><option>Illness</option><option>Higher Education</option><option>Home Purchase</option><option>Business</option><option>Vehicle Purchase</option><option>Debt Consolidation</option><option>Other</option></select></label><label>Purpose remark / Other purpose (optional)<input value={loanDetails.purposeOfLoan} placeholder="Describe the purpose if not listed" onChange={e => setLoanDetails({...loanDetails, purposeOfLoan: e.target.value})} /></label>
             <label>Net disbursal (₹)<input readOnly value={formatCurrency(calculatedFees.net)} /></label>
             <label>Rate type<input readOnly value={pricingPolicy.rateType === 'FIXED' ? 'Fixed' : 'Reducing balance'} /></label>
             <div className="full-width card" style={{padding:16}}>

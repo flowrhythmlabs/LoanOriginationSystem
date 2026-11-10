@@ -1101,3 +1101,22 @@ label:has(> .required-asterisk) > .field-success {
     min-height: 100vh !important;
   }
 }
+/* Align 'Start new application' button perfectly with the 'Loan product' dropdown */
+.inline-actions {
+  display: flex !important;
+  align-items: flex-end !important;
+  gap: 12px !important;
+}
+
+.inline-actions label {
+  margin: 0 !important;
+  display: flex !important;
+  flex-direction: column !important;
+}
+
+.inline-actions select,
+.inline-actions button {
+  height: 48px !important;
+  box-sizing: border-box !important;
+  margin: 0 !important;
+}
